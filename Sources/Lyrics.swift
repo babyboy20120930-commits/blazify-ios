@@ -103,9 +103,10 @@ enum Lyrics {
             ? betterLyrics(title: title, artist: artist,
                            videoId: videoId, duration: duration)
             : [LyricsCandidate]()
+        async let customPlugins = PluginRuntime.fetchLyrics(title: title, artist: artist, videoId: videoId, duration: duration)
         async let plus = prefs.contains(.lyricsPlus)
             ? lyricsPlus(title: title, artist: artist, duration: duration) : [LyricsCandidate]()
-        let all = await apple + better + lrc + kugou + yt + plus
+            let all = await customPlugins + apple + better + lrc + kugou + yt + plus
         // Match quality first — that's what stops a confident-but-wrong result
         // from a preferred provider winning. Then synced, then provider rank.
  // Provider order decides outright — the first
