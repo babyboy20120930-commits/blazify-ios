@@ -8,7 +8,7 @@ import SwiftUI
 struct LyricsSettingsView: View {
     @Environment(\.palette) private var palette
     @ObservedObject private var prefs = LyricsPrefs.shared
-    @ObservedObject private var look = LookFeel.shared
+    @ObservedObject private var look = LookFeel.sharedf
 
     @State private var showProviders = false
     @State private var showPriority = false
@@ -22,6 +22,28 @@ struct LyricsSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 group("Sources") {
+                NavigationLink { ExtensionManagerView(filterKind: .lyrics) } label: {
+                        HStack(spacing: 14) {
+                            icon("text.badge.plus")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Lyrics extensions")
+                                    .font(.blaze(15, .medium))
+                                    .foregroundStyle(palette.onSurface)
+                                Text("Import JSON links or files for custom lyrics")
+                                    .font(.blaze(12))
+                                    .foregroundStyle(palette.onSurfaceVariant)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.blaze(12, .semibold))
+                                .foregroundStyle(palette.onSurfaceVariant.opacity(0.7))
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    divider
+
                     link("text.book.closed", "Lyrics providers",
                          "Choose which services are searched") { showProviders = true }
                     divider
