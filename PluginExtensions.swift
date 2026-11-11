@@ -228,36 +228,6 @@ enum PluginRuntime {
                             return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 95)
                         }
                     }
-                        let parsed = Lyrics.parseLRC(rawText)
-                        if !parsed.isEmpty {
-                            let res = LyricsResult(lines: parsed, plain: nil, synced: true, raw: rawText)
-                            return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 95)
-                        }
-                    }
-                    // Parse JSON dictionary or array
-                    guard let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
-                    let dict: [String: Any]?
-                    if let d = json as? [String: Any] {
-                        dict = (d["data"] as? [String: Any]) ?? d
-                    } else if let arr = json as? [[String: Any]] {
-                        dict = arr.first
-                    } else {
-                        dict = nil
-                    }
-                    guard let dict else { return nil }
-
-                    let syncedKey = plugin.primaryField ?? "syncedLyrics"
-                    let plainKey = plugin.secondaryField ?? "plainLyrics"
-                    let syncedStr = (dict[syncedKey] as? String) ?? (dict["lrc"] as? String) ?? (dict["lyrics"] as? String)
-                    let plainStr = (dict[plainKey] as? String) ?? (dict["text"] as? String)
-
-                    if let s = syncedStr, !s.isEmpty {
-                        let lines = Lyrics.parseLRC(s)
-                        if !lines.isEmpty {
-                            let res = LyricsResult(lines: lines, plain: plainStr, synced: true, raw: s)
-                            return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 95)
-                        }
-                    }
                     if let p = plainStr, !p.isEmpty {
                         let res = LyricsResult(lines: [], plain: p, synced: false, raw: p)
                         return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 60)
