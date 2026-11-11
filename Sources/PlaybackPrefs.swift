@@ -36,6 +36,8 @@ final class PlaybackPrefs: ObservableObject {
     @Published var gapless: Bool { didSet { save(gapless, "gaplessPlayback") } }
     @Published var crossfade: Bool { didSet { save(crossfade, "crossfadeEnabled") } }
     @Published var crossfadeDuration: Double { didSet { save(crossfadeDuration, "crossfadeDuration") } }
+    @Published var beatSyncMix: Bool { didSet { save(beatSyncMix, "beatSyncMixEnabled") } }
+
 
     // Queue
     @Published var persistentQueue: Bool { didSet { save(persistentQueue, "persistentQueue") } }
@@ -108,6 +110,8 @@ final class PlaybackPrefs: ObservableObject {
         gapless = flag("gaplessPlayback", true)
         crossfade = flag("crossfadeEnabled", false)
         crossfadeDuration = number("crossfadeDuration", 4)
+        beatSyncMix = flag("beatSyncMixEnabled", true)
+
 
         persistentQueue = flag("persistentQueue", true)
         autoplay = flag("autoplay", true)
