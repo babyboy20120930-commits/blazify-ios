@@ -1,4 +1,5 @@
 import SwiftUI
+import MediaPlayer
 import UIKit
 
 /// The player. Each design is a DISTINCT full-screen layout (mirroring the
@@ -347,12 +348,20 @@ struct PlayerView: View {
     }
 
     // MARK: Layout dispatch
-
-    @ViewBuilder private var content: some View {
+private var isPadLandscape: Bool {
+    UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.bounds.width > UIScreen.main.bounds.height
+    }
+    
+@ViewBuilder private var content: some View {
         if lyricsMode {
-            standardLayout {
+            if isPadLandscape {
+                iPadTheaterLyricsLayout
+                .transition(.opacity)
+                } else {
+                standardLayout {
                 LyricsPane(player: player, immersive: immersive)
                     .transition(.opacity)
+                }
             }
         } else {
             switch design {
@@ -428,40 +437,59 @@ struct PlayerView: View {
     /// puts those rows in the same places whichever design is on.
     private var stageHeight: CGFloat { min(UIScreen.main.bounds.width - 96, 320) }
 
-    @ViewBuilder private func standardLayout<Stage: View>(
+        @ViewBuilder private func standardLayout<Stage: View>(
         tapToSeek: Bool = true,
         @ViewBuilder stage: () -> Stage,
     ) -> some View {
-        VStack(spacing: 0) {
-            header
-            Spacer(minLength: 12)
-            stage()
-                // Double-tap the left or right half to jump, as on Android. The
-                // halves are decided from where the tap landed rather than from
-                // two overlaid targets, so the stage keeps its own single taps.
-                .overlay {
-                    if tapToSeek {
-                        GeometryReader { geo in
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) { where_ in
-                                    jump(back: where_.x < geo.size.width / 2)
-                                }
+        if isPadLandscape && !lyricsMode {
+            VStack(spacing: 0) {
+                header
+                Spacer(minLength: 12)
+                stage()
+                    .overlay {
+                        if tapToSeek {
+                            GeometryReader { geo in
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture(count: 2) { where_ in
+                                        jump(back: where_.x < geo.size.width / 2)
+                                    }
+                            }
                         }
                     }
-                }
-            Spacer(minLength: 18)
-            titleAndProgress
-            if !immersive {
-                Spacer(minLength: 28)
-                transport
-                Spacer(minLength: 22)
-                bottomRow
-            } else {
-                Spacer(minLength: 16)
+                Spacer(minLength: 12)
+                iPadBottomControlDock
             }
+            .padding(.top, 6)
+        } else {
+            VStack(spacing: 0) {
+                header
+                Spacer(minLength: 12)
+                stage()
+                    .overlay {
+                        if tapToSeek {
+                            GeometryReader { geo in
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture(count: 2) { where_ in
+                                        jump(back: where_.x < geo.size.width / 2)
+                                    }
+                            }
+                        }
+                    }
+                Spacer(minLength: 18)
+                titleAndProgress
+                if !immersive {
+                    Spacer(minLength: 28)
+                    transport
+                    Spacer(minLength: 22)
+                    bottomRow
+                } else {
+                    Spacer(minLength: 16)
+                }
+            }
+            .padding(.top, 6)
         }
-        .padding(.top, 6)
     }
 
     // MARK: Full-art background (5-stop scrim, ported exactly)
@@ -601,23 +629,328 @@ struct PlayerView: View {
         videoLoader.prepareNext(player.upNext, allowed: allowed, maxHeight: height)
     }
 
-    private var fullArtBackground: some View {
+     private var fullArtBackground: some View {
         GeometryReader { geo in
             RemoteImage(url: player.current?.artURL(size: 1280)) { Color.black }
-                .frame(width: geo.size.width, height: geo.size.height)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: isPadLandscape ? .top : .center)
                 .clipped()
                 .overlay(
                     LinearGradient(stops: [
-                        .init(color: .black.opacity(0.40), location: 0.0),
-                        .init(color: .clear, location: 0.35),
-                        .init(color: .black.opacity(0.55), location: 0.60),
-                        .init(color: .black.opacity(0.80), location: 0.80),
+                        .init(color: .black.opacity(0.35), location: 0.0),
+                        .init(color: .clear, location: 0.30),
+                        .init(color: .clear, location: 0.58),
+                        .init(color: .black.opacity(0.75), location: 0.82),
                         .init(color: .black.opacity(0.95), location: 1.0),
                     ], startPoint: .top, endPoint: .bottom),
                 )
         }
         .ignoresSafeArea()
     }
+
+    // MARK: - iPad Landscape Minimal Single-Row Bottom Dock
+
+    private var iPadBottomControlDock: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(player.current?.title ?? "")
+                        .font(.system(size: 24, weight: .bold))
+                        .lineLimit(1)
+                    Text(player.current?.artist ?? "")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .opensArtist(player)
+                }
+
+                Spacer(minLength: 12)
+
+                Button { player.toggleFavorite() } label: {
+                    Image(systemName: player.isCurrentFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 22))
+                        .foregroundStyle(player.isCurrentFavorite ? .red : .white)
+                        .frame(width: 38, height: 38)
+                }
+
+                Button { showDesign = true } label: {
+                    Image(systemName: "paintpalette")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(width: 38, height: 38)
+                        .background(Color.white)
+                        .clipShape(Circle())
+                }
+
+                Button { showMenu = true } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(width: 38, height: 38)
+                        .background(Color.white)
+                        .clipShape(Circle())
+                }
+
+                if !player.isCurrentLive {
+                    Text("\(timeString((scrub ?? player.progress) * player.duration)) / \(timeString(player.duration))")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.leading, 6)
+                        .padding(.bottom, 2)
+                }
+            }
+            .padding(.horizontal, 36)
+
+            if player.isCurrentLive {
+                LiveBadge()
+                    .frame(maxWidth: .infinity, alignment: .center)
+            } else {
+                SlimSlider(
+                    value: Binding(get: { scrub ?? player.progress }, set: { scrub = $0 }),
+                    active: player.artColor,
+                    duration: player.duration,
+                    isPlaying: player.isPlaying,
+                ) { v in
+                    player.seek(to: v)
+                    scrub = nil
+                }
+                .padding(.horizontal, 36)
+                .transaction { $0.animation = nil }
+                .onChange(of: player.current?.videoId) { scrub = nil }
+            }
+
+            if !immersive {
+                ZStack {
+                    HStack(spacing: 0) {
+                        HStack(spacing: 14) {
+                            iPadControlIcon("shuffle", active: player.isShuffled) {
+                                player.toggleShuffle()
+                            }
+                            iPadControlIcon("backward.end.fill") {
+                                player.prev()
+                            }
+                            iPadControlIcon("forward.end.fill") {
+                                _ = player.next()
+                            }
+                            iPadControlIcon(player.repeatMode == .one ? "repeat.1" : "repeat",
+                                            active: player.repeatMode != .off) {
+                                player.cycleRepeat()
+                            }
+                        }
+
+                        Spacer()
+
+                        HStack(spacing: 12) {
+                            iPadUtilityPill("list.bullet") { showQueue = true }
+
+                            RoutePicker(tint: UIColor.white.withAlphaComponent(0.9),
+                                        activeTint: UIColor(Blaze.amber))
+                                .frame(width: 22, height: 22)
+                                .frame(width: 52, height: 42)
+                                .background(Color.white.opacity(0.14), in: Capsule())
+
+                            iPadUtilityPill(player.sleepActive ? "moon.zzz.fill" : "moon.zzz",
+                                            active: player.sleepActive) {
+                                showSleep = true
+                            }
+
+                            iPadUtilityPill("quote.bubble", active: lyricsMode) {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    lyricsMode.toggle()
+                                    if !lyricsMode { immersive = false }
+                                }
+                            }
+                        }
+                    }
+
+                    Button { player.toggle() } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(palette.onAccent)
+                            .frame(width: 68, height: 68)
+                            .background(palette.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: player.isPlaying ? 22 : 34))
+                            .animation(.linear(duration: 0.09), value: player.isPlaying)
+                    }
+                    .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                }
+                .padding(.horizontal, 36)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func iPadControlIcon(_ icon: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(active ? Blaze.amber : .white)
+                .frame(width: 48, height: 42)
+                .background(Color.white.opacity(0.14), in: Capsule())
+        }
+    }
+
+    private func iPadUtilityPill(_ icon: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(active ? Blaze.amber : .white.opacity(0.9))
+                .frame(width: 52, height: 42)
+                .background(Color.white.opacity(0.14), in: Capsule())
+        }
+    }
+    
+    // MARK: - iPad Apple Music / Monochrome Split-View Theatre Lyrics Layout
+
+    private var iPadTheaterLyricsLayout: some View {
+        GeometryReader { geo in
+            let leftWidth = min(max(geo.size.width * 0.38, 320), 430)
+            let artSide = min(leftWidth - 64, geo.size.height * 0.44)
+
+            HStack(spacing: 0) {
+                VStack(spacing: 18) {
+                    HStack(spacing: 14) {
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                lyricsMode = false
+                                immersive = false
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(Color.white.opacity(0.15), in: Circle())
+                        }
+
+                        Button { showEqualizer = true } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 34, height: 34)
+                        }
+
+                        Spacer()
+
+                        Button { showMenu = true } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 34, height: 34)
+                        }
+                    }
+
+                    Spacer(minLength: 4)
+
+                    RemoteImage(url: player.current?.artURL(size: 1080), size: artSide) {
+                        ArtPlaceholder()
+                    }
+                    .frame(width: artSide, height: artSide)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 22, y: 12)
+                    .scaleEffect(player.isPlaying ? 1.0 : 0.94)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.78), value: player.isPlaying)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(player.current?.title ?? "")
+                            .font(.system(size: 20, weight: .bold))
+                            .lineLimit(1)
+                        Text(player.current?.artist ?? "")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                            .opensArtist(player)
+                    }
+                    .frame(maxWidth: artSide, alignment: .leading)
+
+                    if player.isCurrentLive {
+                        LiveBadge()
+                    } else {
+                        VStack(spacing: 6) {
+                            SlimSlider(
+                                value: Binding(get: { scrub ?? player.progress }, set: { scrub = $0 }),
+                                active: .white,
+                                duration: player.duration,
+                                isPlaying: player.isPlaying,
+                            ) { v in
+                                player.seek(to: v)
+                                scrub = nil
+                            }
+                            .transaction { $0.animation = nil }
+
+                            HStack {
+                                Text(timeString((scrub ?? player.progress) * player.duration))
+                                Spacer()
+                                Text(timeString(player.duration))
+                            }
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .frame(maxWidth: artSide)
+                    }
+
+                    HStack(spacing: 14) {
+                        Button { player.toggleFavorite() } label: {
+                            Image(systemName: player.isCurrentFavorite ? "heart.fill" : "heart")
+                                .font(.system(size: 18))
+                                .foregroundStyle(player.isCurrentFavorite ? .red : .white.opacity(0.85))
+                        }
+                        Button { player.toggleShuffle() } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(player.isShuffled ? Blaze.amber : .white.opacity(0.85))
+                        }
+                        Button { player.prev() } label: {
+                            Image(systemName: "backward.end.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white)
+                        }
+                        Button { player.toggle() } label: {
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(palette.onAccent)
+                                .frame(width: 54, height: 54)
+                                .background(palette.accent)
+                                .clipShape(RoundedRectangle(cornerRadius: player.isPlaying ? 18 : 27))
+                                .animation(.linear(duration: 0.09), value: player.isPlaying)
+                        }
+                        Button { _ = player.next() } label: {
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white)
+                        }
+                        Button { player.cycleRepeat() } label: {
+                            Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(player.repeatMode != .off ? Blaze.amber : .white.opacity(0.85))
+                        }
+                    }
+                    .frame(maxWidth: artSide)
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "speaker.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.65))
+                        SystemVolumeSlider()
+                            .frame(height: 28)
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    .frame(maxWidth: artSide)
+
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 16)
+                .frame(width: leftWidth, height: geo.size.height)
+
+                LyricsPane(player: player, immersive: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.trailing, 20)
+            }
+        }
+    }
+
 
     // MARK: Header
 
@@ -867,4 +1200,13 @@ struct PlayerView: View {
         return "Sleep timer"
     }
 
+}
+private struct SystemVolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.showsRouteButton = false
+        view.tintColor = .white
+        return view
+    }
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
