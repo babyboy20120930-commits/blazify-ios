@@ -30,6 +30,7 @@ struct PlayerView: View {
     /// Per-song lyric offset, edited from the ⋮ and read back by the pane.
     @State private var lyricsOffset: Double = 0
     @State private var lyricsMode = false
+    @State private var fullScreenMV = false
     @State private var immersive = false
     /// Offered once, the first time the Video design meets mobile data: the cover
     /// is showing instead of the video, and this is where to say that videos may
@@ -121,13 +122,56 @@ struct PlayerView: View {
                     videoArtBackground
                 }
 
-                content
+                    content
                     .padding(.bottom, 16)
                     .foregroundStyle(.white)
- // Full-player content fades over progress 0.15…0.40, as.
-                    .opacity(min(max((sheetProgress - 0.15) * 4, 0), 1))
+                    .opacity(fullScreenMV ? 0 : min(max((sheetProgress - 0.15) * 4, 0), 1))
+                    .allowsHitTesting(!fullScreenMV)
                     .animation(.easeInOut(duration: 0.25), value: lyricsMode)
                     .animation(.easeInOut(duration: 0.25), value: immersive)
+                    .animation(.easeInOut(duration: 0.3), value: fullScreenMV)
+            }
+            .overlay(alignment: .top) {
+                if player.crossfading {
+                    HStack(spacing: 8) {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 13, weight: .bold))
+                            .symbolEffect(.variableColor.iterative.reversing)
+                        Text("Auto Mix")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                    .padding(.top, 56)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if fullScreenMV {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            fullScreenMV = false
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
+                    }
+                    .padding(.top, 56)
+                    .padding(.trailing, 20)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.crossfading)
+
             }
             .overlay {
                 if let seekFlash {
@@ -198,6 +242,14 @@ struct PlayerView: View {
                     showLyricsTiming = true
                 },
                 onEqualizer: { showEqualizer = true },
+                onExpandMV: {
+                designRaw = PlayerDesign.video.rawValue
+                lyricsMode = false
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    fullScreenMV = true
+                }
+            },
+
             )
         }
     }
@@ -426,7 +478,7 @@ struct PlayerView: View {
             // television-shaped video up to the phone's full height and cut away
             // most of its width, where Android, filling only the part above the
             // progress bar, kept far more of the picture.
-            let stage = geo.size.height * Self.videoStageShare
+            let stage = fullScreenMV ? geo.size.height : (geo.size.height * Self.videoStageShare)
             ZStack(alignment: .top) {
                 Color.black
                 ZStack {
@@ -467,7 +519,7 @@ struct PlayerView: View {
                         .init(color: .clear, location: 0.50),
                         .init(color: .black.opacity(0.85), location: 0.85),
                         .init(color: .black, location: 1.0),
-                    ], startPoint: .top, endPoint: .bottom),
+                    ], startPoint: .top, endPoint: .bottom).opacity(fullScreenMV ? 0 : 1)
                 )
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
