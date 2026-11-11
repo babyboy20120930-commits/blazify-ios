@@ -23,6 +23,7 @@ struct PlayerMenuSheet: View {
     var onLyricsSettings: () -> Void
     var onLyricsTiming: () -> Void
     var onEqualizer: () -> Void
+    var onExpandMV: () -> Void
     /// Opened from here rather than handed upward, because the sheet is the only
     /// place in the player that offers it.
     @State private var showTogether = false
@@ -116,6 +117,22 @@ struct PlayerMenuSheet: View {
                         playback.speed == 1 ? String(localized: "Speed and pitch")
                             : String(localized: "Speed and pitch (\(SpeedSheet.label(playback.speed)))"),
                         tint: playback.speed == 1 ? .white : Blaze.amber) { showSpeed = true }
+                                        row("arrow.up.left.and.arrow.down.right",
+                        String(localized: "Full screen MV"),
+                        tint: Blaze.amber) {
+                        dismiss()
+                        onExpandMV()
+                    }
+
+                    row(playback.crossfade ? "waveform.circle.fill" : "waveform.circle",
+                        playback.crossfade
+                            ? String(localized: "Auto Mix: On (\(Int(playback.crossfadeDuration))s)")
+                            : String(localized: "Auto Mix: Off"),
+                        tint: playback.crossfade ? Blaze.amber : .white) {
+                        playback.crossfade.toggle()
+                    }
+
+    
 
                     if let url = shareURL {
                         ShareLink(item: url) {
