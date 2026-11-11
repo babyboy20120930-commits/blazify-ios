@@ -44,7 +44,7 @@ actor SongVideos {
     private let keepNone: TimeInterval = 2 * 60
 
     /// How far apart a song and its video may be in length and still be the same cut.
-    private let sameCutSeconds: Double = 3
+    private let sameCutSeconds: Double = 45
 
     /// How many search results are looked through for the song's own music video.
     private let candidates = 5
@@ -84,23 +84,19 @@ actor SongVideos {
         // marks its own with OMV, which is what the Android player looks for and
         // why its videos look like music videos.
         guard !track.title.isEmpty, !LocalMusic.isLocal(track.videoId) else { return nil }
-        let query = track.artist.isEmpty ? track.title : "\(track.title) \(track.artist)"
+                let query = track.artist.isEmpty ? track.title : "\(track.title) \(track.artist) Official MV"
         let results = await YouTube.search(query, scope: .videos)
         let official = results.prefix(candidates).filter(\.isOfficialVideo)
+        let pool = official.isEmpty ? Array(results.prefix(candidates)) : official
         VideoArtLog.note("lookup: \"\(query)\" → \(results.count) results, \(official.count) official")
-        guard !official.isEmpty else { return nil }
+        guard !pool.isEmpty else { return nil }
 
-        // The official video closest in length to the song, rather than the
-        // first one found. An album track is often longer than its video —
-        // a 6:50 song with videos of 5:03 and 6:24 — and the first result was
-        // the short one, which ended with most of the song still to go. The
-        // same length as the song follows it in step; any other length runs
-        // on its own and goes round again when it ends.
         let closest = track.duration > 0
-            ? official.min { abs($0.duration - track.duration) < abs($1.duration - track.duration) }
+            ? pool.min { abs($0.duration - track.duration) < abs($1.duration - track.duration) }
             : nil
-        let candidate = closest ?? official[0]
-        let synced = closest.map { $0.duration > 0 && abs($0.duration - track.duration) <= sameCutSeconds } ?? false
+        let candidate = closest ?? pool[0]
+        let synced = closest.map { $0.duration > 0 && abs($0.duration - track.duration) <= sameCutSeconds } ?? true
+
         VideoArtLog.note("lookup: chose \(candidate.videoId) (\(Int(candidate.duration))s for a \(Int(track.duration))s song, \(synced ? "in step" : "its own cut"))")
         guard let found = await YouTube.videoStream(for: candidate.videoId, maxHeight: maxHeight)
         else { return nil }
