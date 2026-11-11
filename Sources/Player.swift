@@ -1705,7 +1705,10 @@ final class Player: ObservableObject {
     /// a download, then the cache, then the network. Both halves matter — see
     /// `preparedDuration`.
     private func resolved(for track: Track) async -> (url: URL, duration: Double)? {
-        if let own = LocalMusic.shared.localAudioURL(for: track.videoId) {
+    if let pluginStream = await PluginRuntime.resolveAudioStream(for: track) {
+        return pluginStream
+    }
+    if let own = LocalMusic.shared.localAudioURL(for: track.videoId) {
             return (own, LocalMusic.shared.duration(for: track.videoId) ?? track.duration)
         }
         if let local = Downloads.shared.localAudioURL(for: track.videoId) {
