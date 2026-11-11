@@ -158,7 +158,7 @@ final class Player: ObservableObject {
     private var fadeTimer: Timer?
     /// True while a crossfade is running, so the normal end-of-track handler
     /// doesn't also try to advance.
-    private var crossfading = false
+    @Published private(set) var crossfading = false
     /// The next track, already built and buffered but paused. Swapping to this
     /// on end is what removes the gap — loading from scratch is the gap.
     private var preparedPlayer: AVPlayer?
