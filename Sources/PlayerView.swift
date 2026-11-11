@@ -172,7 +172,7 @@ struct PlayerView: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.crossfading)
 
-            }
+            
             .overlay {
                 if let seekFlash {
                     Text(seekFlash)
