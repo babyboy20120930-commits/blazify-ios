@@ -1717,11 +1717,13 @@ final class Player: ObservableObject {
         return (stream.url, stream.duration)
     }
 
-    private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
+       private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
         guard let outgoing = avPlayer else { crossfading = false; return }
 
+        let prefs = PlaybackPrefs.shared
         let asset = AVURLAsset(url: url, options: [AVURLAssetHTTPUserAgentKey: YouTube.visionUA])
         let item = AVPlayerItem(asset: asset)
+        item.audioTimePitchAlgorithm = prefs.preservePitch ? .timeDomain : .varispeed
         if realDuration > 0 {
             item.forwardPlaybackEndTime = CMTime(seconds: realDuration, preferredTimescale: 600)
         }
@@ -1730,24 +1732,36 @@ final class Player: ObservableObject {
         incoming.volume = 0
         fadePlayer = incoming
         incoming.play()
-        incoming.rate = Float(PlaybackPrefs.shared.speed)
+        incoming.rate = Float(prefs.speed)
 
+        // Match target loudness for the incoming track to avoid volume jumps
         let startVolume = outgoing.volume
-        let steps = max(Int(seconds * 20), 1)
+        var targetVolume: Float = 1.0
+        if prefs.normalizeVolume,
+           let nextTrack = queue.indices.contains(index + 1) ? queue[index + 1] : nil,
+           let nextLoudness = YouTube.loudnessDb(for: nextTrack.videoId) {
+            let trim = prefs.loudnessTarget - nextLoudness
+            targetVolume = Float(pow(10, min(trim, 0) / 20))
+        }
+
+        // Apple Music-style equal-power cosine crossfade curve at 50Hz
+        let steps = max(Int(seconds * 50), 1)
         var step = 0
         fadeTimer?.invalidate()
         fadeTimer = Timer.scheduledTimer(withTimeInterval: seconds / Double(steps),
                                          repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
             step += 1
-            let t = Float(min(Double(step) / Double(steps), 1))
-            outgoing.volume = startVolume * (1 - t)
-            incoming.volume = startVolume * t
+            let progress = min(Double(step) / Double(steps), 1.0)
+            let angle = Float(progress * (.pi / 2.0))
+            outgoing.volume = startVolume * cos(angle)
+            incoming.volume = targetVolume * sin(angle)
             guard step >= steps else { return }
             timer.invalidate()
-            self.finishCrossfade(volume: startVolume)
+            self.finishCrossfade(volume: targetVolume)
         }
     }
+
 
     /// Hand over to the faded-in player. Deliberately does NOT call
     /// `loadCurrent()` — that would build a third player and restart the song
