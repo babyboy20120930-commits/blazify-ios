@@ -159,6 +159,7 @@ final class Player: ObservableObject {
     /// True while a crossfade is running, so the normal end-of-track handler
     /// doesn't also try to advance.
     @Published private(set) var crossfading = false
+    @Published private(set) var beatSyncedMix = false
     /// The next track, already built and buffered but paused. Swapping to this
     /// on end is what removes the gap — loading from scratch is the gap.
     private var preparedPlayer: AVPlayer?
@@ -1716,14 +1717,17 @@ final class Player: ObservableObject {
         guard let stream = await YouTube.streamURL(for: track.videoId) else { return nil }
         return (stream.url, stream.duration)
     }
-
-       private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
+private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
         guard let outgoing = avPlayer else { crossfading = false; return }
 
         let prefs = PlaybackPrefs.shared
+        let outTrack = current
+        let inTrack = queue.indices.contains(index + 1) ? queue[index + 1] : nil
+        let outURL = (outgoing.currentItem?.asset as? AVURLAsset)?.url
+
         let asset = AVURLAsset(url: url, options: [AVURLAssetHTTPUserAgentKey: YouTube.visionUA])
         let item = AVPlayerItem(asset: asset)
-        item.audioTimePitchAlgorithm = prefs.preservePitch ? .timeDomain : .varispeed
+        item.audioTimePitchAlgorithm = .timeDomain
         if realDuration > 0 {
             item.forwardPlaybackEndTime = CMTime(seconds: realDuration, preferredTimescale: 600)
         }
@@ -1731,36 +1735,73 @@ final class Player: ObservableObject {
         let incoming = AVPlayer(playerItem: item)
         incoming.volume = 0
         fadePlayer = incoming
-        incoming.play()
-        incoming.rate = Float(prefs.speed)
 
-        // Match target loudness for the incoming track to avoid volume jumps
+        let baseSpeed = Float(prefs.speed)
         let startVolume = outgoing.volume
         var targetVolume: Float = 1.0
         if prefs.normalizeVolume,
-           let nextTrack = queue.indices.contains(index + 1) ? queue[index + 1] : nil,
+           let nextTrack = inTrack,
            let nextLoudness = YouTube.loudnessDb(for: nextTrack.videoId) {
             let trim = prefs.loudnessTarget - nextLoudness
             targetVolume = Float(pow(10, min(trim, 0) / 20))
         }
 
-        // Apple Music-style equal-power cosine crossfade curve at 50Hz
-        let steps = max(Int(seconds * 50), 1)
-        var step = 0
-        fadeTimer?.invalidate()
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: seconds / Double(steps),
-                                         repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            step += 1
-            let progress = min(Double(step) / Double(steps), 1.0)
-            let angle = Float(progress * (.pi / 2.0))
-            outgoing.volume = startVolume * cos(angle)
-            incoming.volume = targetVolume * sin(angle)
-            guard step >= steps else { return }
-            timer.invalidate()
-            self.finishCrossfade(volume: targetVolume)
+        Task { @MainActor [weak self] in
+            guard let self, self.fadePlayer === incoming else { return }
+
+            let transition: (startRate: Float, targetRate: Float, seekOffset: Double, beatSynced: Bool)
+            if prefs.beatSyncMix {
+                transition = await AutoMixEngine.shared.computeTransition(
+                    outgoingURL: outURL,
+                    outgoingId: outTrack?.videoId ?? "",
+                    incomingURL: url,
+                    incomingId: inTrack?.videoId ?? "",
+                    baseSpeed: baseSpeed
+                )
+            } else {
+                transition = (baseSpeed, baseSpeed, 0, false)
+            }
+            guard self.fadePlayer === incoming else { return }
+            self.beatSyncedMix = transition.beatSynced
+
+            if transition.seekOffset > 0.02 && transition.seekOffset < 2.0 {
+                await incoming.seek(
+                    to: CMTime(seconds: transition.seekOffset, preferredTimescale: 600),
+                    toleranceBefore: .zero,
+                    toleranceAfter: .zero
+                )
+            }
+
+            incoming.play()
+            incoming.rate = transition.startRate
+
+            let steps = max(Int(seconds * 50), 1)
+            var step = 0
+            self.fadeTimer?.invalidate()
+            self.fadeTimer = Timer.scheduledTimer(withTimeInterval: seconds / Double(steps),
+                                                  repeats: true) { [weak self] timer in
+                guard let self else { timer.invalidate(); return }
+                step += 1
+                let progress = min(Double(step) / Double(steps), 1.0)
+                let angle = Float(progress * (.pi / 2.0))
+
+                outgoing.volume = startVolume * cos(angle)
+                incoming.volume = targetVolume * sin(angle)
+
+                if transition.beatSynced && progress > 0.5 {
+                    let recovery = Float((progress - 0.5) * 2.0)
+                    incoming.rate = transition.startRate + (transition.targetRate - transition.startRate) * recovery
+                }
+
+                guard step >= steps else { return }
+                timer.invalidate()
+                incoming.rate = transition.targetRate
+                self.beatSyncedMix = false
+                self.finishCrossfade(volume: targetVolume)
+            }
         }
     }
+
 
 
     /// Hand over to the faded-in player. Deliberately does NOT call
