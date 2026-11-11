@@ -63,6 +63,11 @@ struct PlayerSettingsView: View {
                                    range: PlaybackPrefs.crossfadeRange, step: 0.5) {
                         String(format: "%.1f s", $0)
                     }
+                                        SettingsDivider()
+                    SettingsToggle(symbol: "metronome.fill", title: "Auto Mix (BitChord)",
+                                   subtitle: "Match BPM beats and align tempo between tracks",
+                                   isOn: $prefs.beatSyncMix)
+
                 }
 
             }
