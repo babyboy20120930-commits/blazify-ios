@@ -69,6 +69,14 @@ struct PlayerSettingsView: View {
                                    isOn: $prefs.beatSyncMix)
 
                 }
+                SettingsDivider()
+                NavigationLink { ExtensionManagerView(filterKind: .audio) } label: {
+                    SettingsLink(symbol: "waveform.badge.plus", title: "Audio extensions",
+                                 subtitle: "Import JSON links or files for external audio sources") {}
+                        .allowsHitTesting(false)
+                }
+                .buttonStyle(.plain)
+
 
             }
 
