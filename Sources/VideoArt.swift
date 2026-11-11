@@ -127,7 +127,8 @@ final class SongVideoLoader: ObservableObject {
 
     private var loadedFor: String?
 
-    func load(for track: Track?, allowed: Bool, maxHeight: Int) {
+        func load(for track: Track?, allowed: Bool, maxHeight: Int) {
+        let maxHeight = 2160
         guard allowed else {
             VideoArtLog.note("load: not allowed on this connection (mobile data, videos off)")
             video = nil
@@ -280,15 +281,7 @@ final class VideoArtPlayers {
         ])
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = Self.buffer
-        if VideoArtLog.kind(of: video.url) == "hls" {
-            // A stream with sizes to choose from: no taller than was asked
-            // for. Twice as wide as tall so the cap is on height alone — a
-            // 480-high picture is a little wider than 16:9 and would miss a
-            // cap set at exactly that. Left off a plain file, which has one
-            // size, so nothing about that path is different from when it
-            // was known to play.
-            item.preferredMaximumResolution = CGSize(width: video.maxHeight * 2, height: video.maxHeight)
-        }
+item.preferredMaximumResolution = .zero
         let made = AVPlayer(playerItem: item)
         made.isMuted = true              // the song is the sound
         made.actionAtItemEnd = .none
