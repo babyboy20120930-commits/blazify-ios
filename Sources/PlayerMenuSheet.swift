@@ -124,13 +124,17 @@ struct PlayerMenuSheet: View {
                         onExpandMV()
                     }
 
-                    row(playback.crossfade ? "waveform.circle.fill" : "waveform.circle",
-                        playback.crossfade
-                            ? String(localized: "Auto Mix: On (\(Int(playback.crossfadeDuration))s)")
-                            : String(localized: "Auto Mix: Off"),
-                        tint: playback.crossfade ? Blaze.amber : .white) {
-                        playback.crossfade.toggle()
+                    let autoMixOn = playback.crossfade && playback.beatSyncMix
+                    row(autoMixOn ? "metronome.fill" : "metronome",
+                    autoMixOn
+                    ? String(localized: "Auto Mix (BitChord): On (\(Int(playback.crossfadeDuration))s)")
+                     : String(localized: "Auto Mix (BitChord): Off"),
+                    tint: autoMixOn ? Blaze.amber : .white) {
+                     let nextState = !autoMixOn
+                    playback.crossfade = nextState
+                    playback.beatSyncMix = nextState
                     }
+
 
     
 
