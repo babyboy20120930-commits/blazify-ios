@@ -45,30 +45,29 @@ struct PlayerSettingsView: View {
                     String(format: "%.2f×", $0)
                 }
                 SettingsDivider()
-                SettingsToggle(symbol: "tuningfork", title: "Keep pitch",
-                               subtitle: "Stop voices rising as the speed goes up",
-                               isOn: $prefs.preservePitch)
-                SettingsDivider()
-                SettingsToggle(symbol: "arrow.triangle.merge", title: "Gapless",
-                               subtitle: "No silence between tracks on a live album or a mix",
-                               isOn: $prefs.gapless)
-                   
-                             SettingsToggle(symbol: "waveform.circle.fill", title: "Auto Mix",
-                               subtitle: "Seamlessly blend the end of one song into the next",
-                               isOn: $prefs.crossfade)
+                SettingsToggle(
+                    symbol: "metronome.fill",
+                    title: "Auto Mix (BitChord)",
+                    subtitle: "Match BPM beats, align tempo, and smoothly blend tracks",
+                    isOn: Binding(
+                        get: { prefs.crossfade && prefs.beatSyncMix },
+                        set: { enabled in
+                            prefs.crossfade = enabled
+                            prefs.beatSyncMix = enabled
+                        }
+                    )
+                )
                 if prefs.crossfade {
                     SettingsDivider()
                     SettingsSlider(symbol: "timer", title: "Auto Mix duration",
-                                   value: $prefs.crossfadeDuration,
-                                   range: PlaybackPrefs.crossfadeRange, step: 0.5) {
-                        String(format: "%.1f s", $0)
+                                   value: $prefs.crossfadeSeconds,
+                                   range: PlaybackPrefs.crossfadeRange,
+                                   step: 0.5) {
+                        String(format: "%.1fs", $0)
                     }
-                                        SettingsDivider()
-                    SettingsToggle(symbol: "metronome.fill", title: "Auto Mix (BitChord)",
-                                   subtitle: "Match BPM beats and align tempo between tracks",
-                                   isOn: $prefs.beatSyncMix)
-
                 }
+
+
                 SettingsDivider()
                 NavigationLink { ExtensionManagerView(filterKind: .audio) } label: {
                     SettingsLink(symbol: "waveform.badge.plus", title: "Audio extensions",
