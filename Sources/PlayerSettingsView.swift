@@ -60,7 +60,7 @@ struct PlayerSettingsView: View {
                 if prefs.crossfade {
                     SettingsDivider()
                     SettingsSlider(symbol: "timer", title: "Auto Mix duration",
-                                   value: $prefs.crossfadeSeconds,
+                                   value: $prefs.crossfadeDuration,
                                    range: PlaybackPrefs.crossfadeRange,
                                    step: 0.5) {
                         String(format: "%.1fs", $0)
