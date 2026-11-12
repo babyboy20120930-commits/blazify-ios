@@ -121,8 +121,8 @@ enum Lyrics {
             if a.element.score != b.element.score { return a.element.score > b.element.score }
             if a.element.synced != b.element.synced { return a.element.synced }
             return a.offset < b.offset
-        }.map(\.element)
-    }
+           }.map { $0.element }
+}
 
     /// How well a search result matches the song we actually want. Ported from
     /// Paxsenix's `scoreAndFilterResults`: duration dominates, then the title,
