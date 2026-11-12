@@ -21,8 +21,8 @@ actor AutoMixEngine {
         outgoingId: String,
         incomingURL: URL?,
         incomingId: String,
-        baseDuration: TimeInterval
-    ) async -> BeatTransitionPlan {
+        baseSpeed: Float
+    ) async -> (startRate: Float, targetRate: Float, seekOffset: Double, beatSynced: Bool) {
         async let outInfo = analyze(url: outgoingURL, id: outgoingId, tail: true)
         async let inInfo = analyze(url: incomingURL, id: incomingId, tail: false)
 
@@ -30,14 +30,7 @@ actor AutoMixEngine {
         let (inBPM, inFirstBeat) = await inInfo
 
         guard outBPM > 55, inBPM > 55 else {
-            return BeatTransitionPlan(
-                duration: baseDuration,
-                outgoingRate: 1.0,
-                incomingRate: 1.0,
-                incomingStartOffset: 0,
-                outgoingBPM: outBPM,
-                incomingBPM: inBPM
-            )
+            return (baseSpeed, baseSpeed, 0, false)
         }
 
         // Normalize half/double tempo
@@ -45,24 +38,12 @@ actor AutoMixEngine {
         if targetInBPM < outBPM * 0.72 { targetInBPM *= 2.0 }
         if targetInBPM > outBPM * 1.38 { targetInBPM /= 2.0 }
 
-        let ratio = outBPM / targetInBPM
+        let ratio = Float(outBPM / targetInBPM)
         let clampedRatio = min(max(ratio, 0.92), 1.08)
 
-        // Snap transition duration to a musical bar multiple (4 beats = 1 bar)
-        let beatSec = 60.0 / outBPM
-        let barSec = beatSec * 4.0
-        let bars = max(1, round(baseDuration / barSec))
-        let snappedDuration = min(max(bars * barSec, 2.0), 15.0)
-
-        return BeatTransitionPlan(
-            duration: snappedDuration,
-            outgoingRate: 1.0,
-            incomingRate: Float(clampedRatio),
-            incomingStartOffset: min(inFirstBeat, 8.0),
-            outgoingBPM: outBPM,
-            incomingBPM: targetInBPM
-        )
+        return (baseSpeed * clampedRatio, baseSpeed, min(inFirstBeat, 8.0), true)
     }
+
 
     private func analyze(url: URL?, id: String, tail: Bool) async -> (Double, TimeInterval) {
         if let cached = bpmCache[id] { return cached }
