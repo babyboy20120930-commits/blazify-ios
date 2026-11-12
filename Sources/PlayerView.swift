@@ -564,6 +564,12 @@ private var isPadLandscape: Bool {
         .onChange(of: player.isPlaying) { loadVideoIfComfortable() }
         .onChange(of: prefs.videoOnMobile) { videoWanted = true; loadVideoIfComfortable() }
         .onChange(of: net.isUnmetered) { videoWanted = true; loadVideoIfComfortable() }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+         guard design == .video else { return }
+        videoWanted = true
+        loadVideoIfComfortable()
+        }
+
         .onAppear {
             videoWanted = true
             loadVideoIfComfortable()
