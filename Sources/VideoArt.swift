@@ -11,6 +11,7 @@ struct SongVideo: Equatable {
     let videoId: String
     let url: URL
     let synced: Bool
+    var introOffset: Double = 0
     /// The tallest picture asked for. A plain file was chosen at this size
     /// already; an HLS stream chooses for itself and is held to it here.
     let maxHeight: Int
@@ -91,17 +92,32 @@ actor SongVideos {
         VideoArtLog.note("lookup: \"\(query)\" → \(results.count) results, \(official.count) official")
         guard !pool.isEmpty else { return nil }
 
-        let closest = track.duration > 0
+                let closest = track.duration > 0
             ? pool.min { abs($0.duration - track.duration) < abs($1.duration - track.duration) }
             : nil
         let candidate = closest ?? pool[0]
         let synced = closest.map { $0.duration > 0 && abs($0.duration - track.duration) <= sameCutSeconds } ?? true
 
-        VideoArtLog.note("lookup: chose \(candidate.videoId) (\(Int(candidate.duration))s for a \(Int(track.duration))s song, \(synced ? "in step" : "its own cut"))")
+        // Auto-detect non-music cinematic intro duration in seconds
+        var detectedOffset: Double = 0
+        if synced, candidate.videoId != track.videoId {
+            let segments = await SponsorBlock.segments(videoId: candidate.videoId, categories: [.musicOfftopic])
+            if let opening = segments.first(where: { $0.start <= 3.0 && $0.end > 2.0 && $0.end < 90.0 }) {
+                detectedOffset = opening.end
+            } else if track.duration > 0, candidate.duration > track.duration {
+                let extra = candidate.duration - track.duration
+                if extra >= 4.0 && extra <= sameCutSeconds {
+                    detectedOffset = extra * 0.75
+                }
+            }
+        }
+
+        VideoArtLog.note("lookup: chose \(candidate.videoId) (\(Int(candidate.duration))s for a \(Int(track.duration))s song, synced=\(synced), introOffset=\(String(format: "%.1f", detectedOffset))s)")
         guard let found = await YouTube.videoStream(for: candidate.videoId, maxHeight: maxHeight)
         else { return nil }
         return SongVideo(videoId: candidate.videoId, url: found.url, synced: synced,
-                         maxHeight: maxHeight, alternate: found.alternate)
+                         introOffset: detectedOffset, maxHeight: maxHeight, alternate: found.alternate)
+
     }
 }
 
@@ -344,7 +360,7 @@ struct VideoArtView: UIViewRepresentable {
         view.backgroundColor = .clear   // the cover shows through until a frame arrives
         context.coordinator.onTrouble = onTrouble
         context.coordinator.onFirstFrame = onFirstFrame
-        context.coordinator.attach(to: view, video: video)
+        context.coordinator.attach(to: view, video: video, initialPosition: position, songLength: songLength)
         return view
     }
 
@@ -419,6 +435,9 @@ struct VideoArtView: UIViewRepresentable {
 
         /// True once the second address has been tried for the current video.
         private var fellBack = false
+        private var initialSeekDone = false
+        private var pendingInitialPosition: Double = 0
+        private var pendingSongLength: Double = 0
 
         func attach(to view: PlayerContainerView, video: SongVideo, fallingBack: Bool = false) {
             // Lent out rather than built: a player kept from the last time this
@@ -451,7 +470,17 @@ struct VideoArtView: UIViewRepresentable {
             statusObs = item?.observe(\.status, options: [.new]) { [weak self, weak view] item, _ in
                 if item.status == .readyToPlay {
                     VideoArtLog.note("item: ready, duration=\(item.duration.seconds.isFinite ? Int(item.duration.seconds) : -1)s")
-                }
+                if let self, !self.initialSeekDone {
+                self.initialSeekDone = true
+                let target = self.pendingInitialPosition + video.introOffset
+                if target > 0.5 {
+                let dur = item.duration.seconds
+                let safeTarget = (dur.isFinite && dur > 1) ? min(target, max(0, dur - 0.5)) : target
+                player.seek(to: CMTime(seconds: safeTarget, preferredTimescale: 600),
+                            toleranceBefore: .zero, toleranceAfter: .zero)
+                                }
+               }
+           }
                 guard item.status == .failed else { return }
                 let reason = item.error?.localizedDescription ?? "the video would not load"
                 if let error = item.error as NSError? {
@@ -562,12 +591,14 @@ struct VideoArtView: UIViewRepresentable {
 
         func update(video: SongVideo, position: Double, songLength: Double,
                     isPlaying: Bool, view: PlayerContainerView) {
+            self.pendingInitialPosition = position
+            self.pendingSongLength = songLength
             if current != video {
                 stop()
                 placed = false
                 lead = 0.8
                 fellBack = false
-                attach(to: view, video: video)
+                attach(to: view, video: video, initialPosition: position, songLength: songLength)
             }
             guard let player else { return }
             defer { lastPosition = position }
@@ -620,14 +651,22 @@ struct VideoArtView: UIViewRepresentable {
                 return
             }
 
+            let targetPos = position + video.introOffset
             let at = player.currentTime().seconds
             guard at.isFinite else { return }
-            let drift = position - at
+            let drift = targetPos - at
 
             if justJumped {
                 // Half the miss, so one slow answer does not throw the next jump far off.
                 lead = min(max(lead + drift / 2, 0), maxLead)
                 justJumped = false
+            }
+
+            if abs(drift) > jumpBeyond {
+                player.rate = 1
+                player.seek(to: CMTime(seconds: targetPos + lead, preferredTimescale: 600),
+                            toleranceBefore: .zero, toleranceAfter: .zero)
+                justJumped = true
             }
 
             if abs(drift) > jumpBeyond {
