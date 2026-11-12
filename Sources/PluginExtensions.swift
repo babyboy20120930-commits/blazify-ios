@@ -105,16 +105,16 @@ enum PluginRuntime {
         return nil
     }
 
-    static func fetchLyrics(title: String, artist: String, videoId: String, duration: Double) async -> [LyricsSource] {
+     static func fetchLyrics(title: String, artist: String, videoId: String, duration: Double) async -> [LyricsCandidate] {
         let active = await MainActor.run {
             PluginStore.shared.plugins.filter { $0.kind == .lyrics && $0.isEnabled }
         }
         guard !active.isEmpty else { return [] }
 
-        var results: [LyricsSource] = []
+        var results: [LyricsCandidate] = []
         for plugin in active {
-            if let source = await queryLyrics(plugin: plugin, title: title, artist: artist, videoId: videoId, duration: duration) {
-                results.append(source)
+            if let candidate = await queryLyrics(plugin: plugin, title: title, artist: artist, videoId: videoId, duration: duration) {
+                results.append(candidate)
             }
         }
         return results
@@ -154,7 +154,7 @@ enum PluginRuntime {
         return nil
     }
 
-    private static func queryLyrics(plugin: InstalledPlugin, title: String, artist: String, videoId: String, duration: Double) async -> LyricsSource? {
+        private static func queryLyrics(plugin: InstalledPlugin, title: String, artist: String, videoId: String, duration: Double) async -> LyricsCandidate? {
         let q = "\(title) \(artist)".trimmingCharacters(in: .whitespaces)
         guard let reqURL = buildRequestURL(plugin: plugin, query: q, videoId: videoId, title: title, artist: artist) else { return nil }
         var req = URLRequest(url: reqURL)
@@ -165,18 +165,39 @@ enum PluginRuntime {
               let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
 
         if let lrc = extractString(from: json, keyPath: plugin.syncedLyricsKeyPath), !lrc.isEmpty {
-            let parsed = LRC.parse(lrc)
+            let parsed = parseLRC(lrc)
             if !parsed.isEmpty {
-                return LyricsSource(provider: plugin.name, lines: parsed, synced: true)
+                let res = LyricsResult(lines: parsed, plain: nil, synced: true, raw: lrc)
+                return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 85)
             }
         }
         if let plain = extractString(from: json, keyPath: plugin.lyricsKeyPath), !plain.isEmpty {
-            let lines = plain.components(separatedBy: .newlines).map { LyricLine(time: 0, text: $0) }
-            if !lines.isEmpty {
-                return LyricsSource(provider: plugin.name, lines: lines, synced: false)
-            }
+            let res = LyricsResult(lines: [], plain: plain, synced: false, raw: plain)
+            return LyricsCandidate(provider: plugin.name, trackName: title, artistName: artist, result: res, score: 60)
         }
         return nil
+    }
+
+    private static func parseLRC(_ text: String) -> [LyricLine] {
+        let pattern = #"\[(\d{1,2}):(\d{2})(?:[\.:](\d{1,3}))?\](.*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var lines: [LyricLine] = []
+        for rawLine in text.components(separatedBy: .newlines) {
+            let ns = rawLine as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            guard let m = regex.firstMatch(in: rawLine, range: range), m.numberOfRanges >= 5 else { continue }
+            let minVal = Double(ns.substring(with: m.range(at: 1))) ?? 0
+            let secVal = Double(ns.substring(with: m.range(at: 2))) ?? 0
+            var fracVal: Double = 0
+            if m.range(at: 3).location != NSNotFound {
+                let fracStr = ns.substring(with: m.range(at: 3))
+                let denom = pow(10.0, Double(fracStr.count))
+                fracVal = (Double(fracStr) ?? 0) / denom
+            }
+            let lyricText = ns.substring(with: m.range(at: 4)).trimmingCharacters(in: .whitespaces)
+            lines.append(LyricLine(time: minVal * 60 + secVal + fracVal, text: lyricText))
+        }
+        return lines.sorted { $0.time < $1.time }
     }
 
     private static func extractString(from object: Any, keyPath: String) -> String? {
