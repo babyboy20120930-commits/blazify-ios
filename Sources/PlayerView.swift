@@ -32,6 +32,7 @@ struct PlayerView: View {
     @State private var lyricsOffset: Double = 0
     @State private var lyricsMode = false
     @State private var fullScreenMV = false
+     @State private var showWatchMV = false
     @State private var immersive = false
     /// Offered once, the first time the Video design meets mobile data: the cover
     /// is showing instead of the video, and this is where to say that videos may
