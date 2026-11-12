@@ -101,10 +101,13 @@ actor SongVideos {
         // Auto-detect non-music cinematic intro duration in seconds
         var detectedOffset: Double = 0
         if synced, candidate.videoId != track.videoId {
-            let segments = await SponsorBlock.segments(videoId: candidate.videoId, categories: [.musicOfftopic])
+            if let cat = SponsorBlock.Category(rawValue: "music_offtopic") {
+            let segments = await SponsorBlock.segments(videoId: candidate.videoId, categories: [cat])
             if let opening = segments.first(where: { $0.start <= 3.0 && $0.end > 2.0 && $0.end < 90.0 }) {
                 detectedOffset = opening.end
-            } else if track.duration > 0, candidate.duration > track.duration {
+                }
+            }
+            if detectedOffset == 0, track.duration > 0, candidate.duration > track.duration {
                 let extra = candidate.duration - track.duration
                 if extra >= 4.0 && extra <= sameCutSeconds {
                     detectedOffset = extra * 0.75
@@ -440,7 +443,11 @@ struct VideoArtView: UIViewRepresentable {
         private var pendingInitialPosition: Double = 0
         private var pendingSongLength: Double = 0
 
-        func attach(to view: PlayerContainerView, video: SongVideo, fallingBack: Bool = false) {
+        func attach(to view: PlayerContainerView, video: SongVideo, fallingBack: Bool = false,
+            initialPosition: Double = 0, songLength: Double = 0) {
+          self.initialSeekDone = false
+          self.pendingInitialPosition = initialPosition
+          self.pendingSongLength = songLength
             // Lent out rather than built: a player kept from the last time this
             // screen was open already holds what it fetched, so reopening shows
             // a picture instead of buffering one.
