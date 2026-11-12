@@ -232,28 +232,28 @@ struct PlayerView: View {
         .sheet(isPresented: $showSleep) {
             SleepTimerView(player: player).environment(\.palette, palette)
         }
-        .sheet(isPresented: $showMenu) {
+            .sheet(isPresented: $showMenu) {
             PlayerMenuSheet(
-                player: player,
-                onQueue: { showQueue = true },
-                onSleep: { showSleep = true },
-                onLyrics: { lyricsMode = true },
-                onLyricsSettings: { showLyricsSettings = true },
-                onLyricsTiming: {
-                    lyricsOffset = LyricsOffsets.load(for: player.current?.videoId ?? "")
-                    showLyricsTiming = true
+            player: player,
+            onQueue: { showQueue = true },
+            onSleep: { showSleep = true },
+            onLyrics: { lyricsMode = true },
+            onLyricsSettings: { showLyricsSettings = true },
+            onLyricsTiming: {
+            lyricsOffset = LyricsOffsets.load(for: player.current?.videoId ?? "")
+            showLyricsTiming = true
                 },
-                onEqualizer: { showEqualizer = true },
-                onExpandMV: {
-                designRaw = PlayerDesign.video.rawValue
-                lyricsMode = false
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                    fullScreenMV = true
+            onEqualizer: { showEqualizer = true },
+            onExpandMV: {
+            showWatchMV = true
                 }
-            },
-
             )
         }
+        .fullScreenCover(isPresented: $showWatchMV) {
+            MVPlayerSheet(player: player)
+        }
+
+            )
     }
 
     /// The sheet drag: 1:1 with the finger, then a velocity/position classifier —
