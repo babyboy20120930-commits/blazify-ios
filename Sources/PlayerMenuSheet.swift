@@ -117,8 +117,8 @@ struct PlayerMenuSheet: View {
                         playback.speed == 1 ? String(localized: "Speed and pitch")
                             : String(localized: "Speed and pitch (\(SpeedSheet.label(playback.speed)))"),
                         tint: playback.speed == 1 ? .white : Blaze.amber) { showSpeed = true }
-                                        row("arrow.up.left.and.arrow.down.right",
-                        String(localized: "Full screen MV"),
+                        row("play.tv.fill",
+                        String(localized: "Watch MV"),
                         tint: Blaze.amber) {
                         dismiss()
                         onExpandMV()
