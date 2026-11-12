@@ -4,6 +4,11 @@ import Foundation
 enum PlayerDesign: String, CaseIterable, Identifiable {
     case classic, ring, fullArt, record, cassette, video
 
+    /// Visible themes in the Player theme picker (Video Art is moved to the dedicated Watch MV player).
+    static var allCases: [PlayerDesign] {
+        [.classic, .ring, .fullArt, .record, .cassette]
+    }
+
     var id: String { rawValue }
 
     var title: String {
