@@ -139,8 +139,9 @@ final class SongVideoLoader: ObservableObject {
 
     private var loadedFor: String?
 
-        func load(for track: Track?, allowed: Bool, maxHeight: Int) {
-        let maxHeight = 2160
+      func load(for track: Track?, allowed: Bool, maxHeight: Int) {
+      let saved = UserDefaults.standard.integer(forKey: "preferredVideoHeight")
+      let maxHeight = saved > 0 ? saved : 2160
         guard allowed else {
             VideoArtLog.note("load: not allowed on this connection (mobile data, videos off)")
             video = nil
