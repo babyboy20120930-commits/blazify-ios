@@ -1706,8 +1706,8 @@ final class Player: ObservableObject {
     /// `preparedDuration`.
     private func resolved(for track: Track) async -> (url: URL, duration: Double)? {
     if let pluginStream = await PluginRuntime.resolveAudioStream(for: track) {
-        return pluginStream
-    }
+     return (pluginStream, track.duration)
+ }
     if let own = LocalMusic.shared.localAudioURL(for: track.videoId) {
             return (own, LocalMusic.shared.duration(for: track.videoId) ?? track.duration)
         }
