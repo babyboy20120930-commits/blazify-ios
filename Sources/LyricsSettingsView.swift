@@ -8,7 +8,7 @@ import SwiftUI
 struct LyricsSettingsView: View {
     @Environment(\.palette) private var palette
     @ObservedObject private var prefs = LyricsPrefs.shared
-    @ObservedObject private var look = LookFeel.sharedf
+    @ObservedObject private var look = LookFeel.shared
 
     @State private var showProviders = false
     @State private var showPriority = false
