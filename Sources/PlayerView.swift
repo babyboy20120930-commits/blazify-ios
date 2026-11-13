@@ -254,7 +254,6 @@ struct PlayerView: View {
             MVPlayerSheet(player: player)
         }
 
-            )
     }
 
     /// The sheet drag: 1:1 with the finger, then a velocity/position classifier —
