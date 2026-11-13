@@ -2,15 +2,6 @@ import Accelerate
 import AVFoundation
 import Foundation
 
-struct BeatTransitionPlan {
-    let duration: TimeInterval
-    let outgoingRate: Float
-    let incomingRate: Float
-    let incomingStartOffset: TimeInterval
-    let outgoingBPM: Double
-    let incomingBPM: Double
-}
-
 actor AutoMixEngine {
     static let shared = AutoMixEngine()
 
@@ -33,54 +24,98 @@ actor AutoMixEngine {
             return (baseSpeed, baseSpeed, 0, false)
         }
 
-        // Normalize half/double tempo
+        // Normalize half/double tempo (e.g. 75 BPM vs 150 BPM)
         var targetInBPM = inBPM
         if targetInBPM < outBPM * 0.72 { targetInBPM *= 2.0 }
         if targetInBPM > outBPM * 1.38 { targetInBPM /= 2.0 }
 
         let ratio = Float(outBPM / targetInBPM)
-        let clampedRatio = min(max(ratio, 0.92), 1.08)
+        // Allow up to ±12% smooth tempo matching so beats lock together clearly
+        let clampedRatio = min(max(ratio, 0.88), 1.12)
 
-        return (baseSpeed * clampedRatio, baseSpeed, min(inFirstBeat, 8.0), true)
+        return (baseSpeed * clampedRatio, baseSpeed, min(inFirstBeat, 6.0), true)
     }
 
-
     private func analyze(url: URL?, id: String, tail: Bool) async -> (Double, TimeInterval) {
-        if let cached = bpmCache[id] { return cached }
-        guard let url, url.isFileURL else { return (0, 0) }
+        if !id.isEmpty, let cached = bpmCache[id] { return cached }
+
+        // Resolve local file first, otherwise fall back to streaming URL via AVAssetReader
+        let resolvedURL: URL? = await MainActor.run {
+            if let own = LocalMusic.shared.localAudioURL(for: id) { return own }
+            if let dl = Downloads.shared.localAudioURL(for: id) { return dl }
+            if let cache = AudioCache.shared.cachedURL(for: id) { return cache }
+            return url
+        }
+
+        guard let targetURL = resolvedURL else { return (0, 0) }
 
         do {
-            let file = try AVAudioFile(forReading: url)
-            let format = file.processingFormat
-            let sr = format.sampleRate
-            let totalFrames = file.length
-            guard sr > 0, totalFrames > AVAudioFramePosition(sr * 6) else { return (0, 0) }
+            let asset = AVURLAsset(url: targetURL, options: [
+                AVURLAssetHTTPUserAgentKey: YouTube.visionUA
+            ])
+            let tracks = try await asset.loadTracks(withMediaType: .audio)
+            guard let audioTrack = tracks.first else { return (0, 0) }
 
-            let windowFrames = AVAudioFrameCount(min(Double(totalFrames), sr * 24.0))
-            if tail {
-                file.framePosition = max(0, totalFrames - AVAudioFramePosition(windowFrames))
-            } else {
-                file.framePosition = 0
+            let durationCM = try await asset.load(.duration)
+            let totalSec = durationCM.seconds
+            guard totalSec.isFinite, totalSec > 6.0 else { return (0, 0) }
+
+            let reader = try AVAssetReader(asset: asset)
+            let windowSec = min(totalSec, 20.0)
+            let startSec = tail ? max(0, totalSec - windowSec) : 0
+            reader.timeRange = CMTimeRange(
+                start: CMTime(seconds: startSec, preferredTimescale: 600),
+                duration: CMTime(seconds: windowSec, preferredTimescale: 600)
+            )
+
+            let outputSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+                AVSampleRateKey: 22050.0,
+                AVNumberOfChannelsKey: 1
+            ]
+
+            let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: outputSettings)
+            output.alwaysCopiesSampleData = false
+            guard reader.canAdd(output) else { return (0, 0) }
+            reader.add(output)
+            guard reader.startReading() else { return (0, 0) }
+
+            var samples: [Float] = []
+            samples.reserveCapacity(Int(22050.0 * windowSec))
+
+            while reader.status == .reading {
+                guard let sampleBuffer = output.copyNextSampleBuffer() else { break }
+                guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+                var length = 0
+                var dataPointer: UnsafeMutablePointer<Int8>?
+                let status = CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
+                if status == kCMBlockBufferNoErr, let dataPointer, length > 0 {
+                    let floatCount = length / MemoryLayout<Float>.size
+                    dataPointer.withMemoryRebound(to: Float.self, capacity: floatCount) { ptr in
+                        samples.append(contentsOf: UnsafeBufferPointer(start: ptr, count: floatCount))
+                    }
+                }
             }
 
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: windowFrames) else {
-                return (0, 0)
-            }
-            try file.read(into: buffer)
-            guard let channelData = buffer.floatChannelData?[0] else { return (0, 0) }
-            let count = Int(buffer.frameLength)
-            guard count > 4096 else { return (0, 0) }
+            guard samples.count > 44100 else { return (0, 0) }
 
             // Compute RMS energy envelope in 20ms hops (50 Hz envelope rate)
-            let hop = max(1, Int(sr * 0.02))
-            let envCount = count / hop
+            let hop = Int(22050.0 * 0.02)
+            let envCount = samples.count / hop
             guard envCount > 120 else { return (0, 0) }
 
             var env = [Float](repeating: 0, count: envCount)
-            for i in 0..<envCount {
-                var rms: Float = 0
-                vDSP_rmsqv(channelData.advanced(by: i * hop), 1, &rms, vDSP_Length(hop))
-                env[i] = rms
+            samples.withUnsafeBufferPointer { buf in
+                guard let base = buf.baseAddress else { return }
+                for i in 0..<envCount {
+                    var rms: Float = 0
+                    vDSP_rmsqv(base.advanced(by: i * hop), 1, &rms, vDSP_Length(hop))
+                    env[i] = rms
+                }
             }
 
             // Onset strength (positive half-wave rectified difference)
@@ -90,7 +125,7 @@ actor AutoMixEngine {
             vDSP_maxv(env, 1, &peak, vDSP_Length(envCount))
             for i in 1..<envCount {
                 onset[i] = max(0, env[i] - env[i - 1])
-                if firstBeatIdx == 0 && env[i] > peak * 0.35 {
+                if firstBeatIdx == 0 && env[i] > peak * 0.30 {
                     firstBeatIdx = i
                 }
             }
@@ -117,7 +152,9 @@ actor AutoMixEngine {
             let bpm = bestLag > 0 ? (50.0 * 60.0) / Double(bestLag) : 0
             let firstBeatSec = Double(firstBeatIdx) * 0.02
             let result = (bpm, firstBeatSec)
-            bpmCache[id] = result
+            if !id.isEmpty, bpm > 0 {
+                bpmCache[id] = result
+            }
             return result
         } catch {
             return (0, 0)
