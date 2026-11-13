@@ -145,7 +145,7 @@ struct MVPlayerSheet: View {
                                 }
 
                                 Button {
-                                    player.next()
+                                   _ =  player.next()
                                 } label: {
                                     Image(systemName: "forward.end.fill")
                                         .font(.system(size: 17, weight: .semibold))
