@@ -1100,20 +1100,20 @@ private var isPadLandscape: Bool {
 
             // Left collapsible glass sidebar drawer
             HStack(spacing: 0) {
-                if fullArtDrawerOpen {
-                    VStack(spacing: 14) {
-                        sidebarIcon("backward.fill", label: "Prev") {
+                    if fullArtDrawerOpen {
+                    VStack(spacing: 12) {
+                        sidebarIcon("backward.end.fill", label: "Prev") {
                             player.prev()
                         }
-                        sidebarIcon("forward.fill", label: "Next") {
-                            player.next()
+                        sidebarIcon("forward.end.fill", label: "Next") {
+                            _ = player.next()
                         }
-                        sidebarIcon(player.shuffle ? "shuffle.circle.fill" : "shuffle",
+                        sidebarIcon("shuffle",
                                     label: "Shuffle",
-                                    active: player.shuffle) {
+                                    active: player.isShuffled) {
                             player.toggleShuffle()
                         }
-                        sidebarIcon(repeatIconName,
+                        sidebarIcon(player.repeatMode == .one ? "repeat.1" : "repeat",
                                     label: "Repeat",
                                     active: player.repeatMode != .off) {
                             player.cycleRepeat()
@@ -1123,36 +1123,15 @@ private var isPadLandscape: Bool {
                             .background(Color.white.opacity(0.25))
                             .frame(width: 28)
 
-                        // Vertical volume control
-                        VStack(spacing: 6) {
-                            Image(systemName: player.volume <= 0.01 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                .font(.system(size: 13, weight: .semibold))
+                        // Native iOS System Volume Slider (rotated vertically)
+                        VStack(spacing: 4) {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.9))
-                                .onTapGesture {
-                                    player.volume = player.volume > 0.01 ? 0 : 0.8
-                                }
-                            GeometryReader { vGeo in
-                                let h = max(1, vGeo.size.height)
-                                let vRatio = CGFloat(min(max(player.volume, 0), 1))
-                                ZStack(alignment: .bottom) {
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.25))
-                                        .frame(width: 4)
-                                    Capsule()
-                                        .fill(Color.white)
-                                        .frame(width: 4, height: h * vRatio)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { g in
-                                            let r = 1.0 - min(max(g.location.y / h, 0), 1)
-                                            player.volume = Float(r)
-                                        }
-                                )
-                            }
-                            .frame(width: 24, height: 74)
+                            SystemVolumeSlider()
+                                .frame(width: 72, height: 22)
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 28, height: 74)
                         }
 
                         Divider()
@@ -1164,8 +1143,8 @@ private var isPadLandscape: Bool {
                                     active: player.sleepActive) {
                             showSleep = true
                         }
-                        sidebarIcon("quote.bubble", label: "Lyrics") {
-                            lyricsMode = true
+                        sidebarIcon("quote.bubble", label: "Lyrics", active: lyricsMode) {
+                            lyricsMode.toggle()
                         }
                         sidebarIcon("paintpalette", label: "Theme") {
                             showDesign = true
@@ -1174,6 +1153,7 @@ private var isPadLandscape: Bool {
                             showMenu = true
                         }
                     }
+
                     .padding(.vertical, 14)
                     .padding(.horizontal, 10)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
