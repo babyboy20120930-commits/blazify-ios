@@ -1730,12 +1730,13 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
 
         let asset = AVURLAsset(url: url, options: [AVURLAssetHTTPUserAgentKey: YouTube.visionUA])
         let item = AVPlayerItem(asset: asset)
-        item.audioTimePitchAlgorithm = .timeDomain
+        item.audioTimePitchAlgorithm = .spectral
         if realDuration > 0 {
             item.forwardPlaybackEndTime = CMTime(seconds: realDuration, preferredTimescale: 600)
         }
         fadeDuration = realDuration
         let incoming = AVPlayer(playerItem: item)
+        incoming.automaticallyWaitsToMinimizeStalling = false
         incoming.volume = 0
         fadePlayer = incoming
 
@@ -1767,7 +1768,15 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
             guard self.fadePlayer === incoming else { return }
             self.beatSyncedMix = transition.beatSynced
 
-            if transition.seekOffset > 0.02 && transition.seekOffset < 2.0 {
+            // Wait briefly for network stream buffer readiness so both tracks overlap audibly
+            var waitCount = 0
+            while item.status != .readyToPlay && waitCount < 15 {
+                try? await Task.sleep(for: .milliseconds(80))
+                waitCount += 1
+            }
+            guard self.fadePlayer === incoming else { return }
+
+            if transition.seekOffset > 0.02 && transition.seekOffset < 4.0 {
                 await incoming.seek(
                     to: CMTime(seconds: transition.seekOffset, preferredTimescale: 600),
                     toleranceBefore: .zero,
@@ -1804,9 +1813,6 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
             }
         }
     }
-
-
-
     /// Hand over to the faded-in player. Deliberately does NOT call
     /// `loadCurrent()` — that would build a third player and restart the song
     /// we've just spent the whole fade blending into. Everything except the
