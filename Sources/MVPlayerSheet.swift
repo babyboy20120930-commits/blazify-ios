@@ -129,7 +129,7 @@ struct MVPlayerSheet: View {
                             // Left: Prev, Play/Pause, Next, Timecode
                             HStack(spacing: 18) {
                                 Button {
-                                    player.previous()
+                                    player.prev()
                                 } label: {
                                     Image(systemName: "backward.end.fill")
                                         .font(.system(size: 17, weight: .semibold))
