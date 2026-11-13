@@ -1024,6 +1024,30 @@ private var isPadLandscape: Bool {
                         }
 
                         Spacer(minLength: 8)
+                        // Audio quality capsule (FLAC / HIGH / LOW)
+                        HStack(spacing: 4) {
+                            if player.audioQualityBadge == "FLAC" {
+                                Image(systemName: "waveform")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            Text(player.audioQualityBadge)
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .tracking(0.6)
+                        }
+                        .foregroundStyle(player.audioQualityBadge == "FLAC" ? Blaze.amber : .white.opacity(0.92))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            (player.audioQualityBadge == "FLAC" ? Blaze.amber.opacity(0.22) : Color.white.opacity(0.16)),
+                            in: Capsule()
+                        )
+                        .overlay(
+                            Capsule().stroke(
+                                player.audioQualityBadge == "FLAC" ? Blaze.amber.opacity(0.55) : Color.white.opacity(0.25),
+                                lineWidth: 0.6
+                            )
+                        )
+
 
                         // Heart + Timecode on the right
                         Button {
