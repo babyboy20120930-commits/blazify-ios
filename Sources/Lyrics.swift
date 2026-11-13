@@ -87,42 +87,63 @@ enum Lyrics {
     /// `videoId` unlocks YouTube's own lyrics when known.
     static func search(title: String, artist: String, videoId: String = "",
                        duration: Double = 0) async -> [LyricsCandidate] {
-        // Settings → Lyrics → Providers decides who gets asked at all. Reading
-        // the flags up front keeps the fan-out itself unconditional.
         let prefs = await MainActor.run { LyricsPrefs.shared.snapshot() }
 
-        async let lrc = prefs.contains(.lrcLib)
-            ? lrcLib(title: title, artist: artist, duration: duration) : [LyricsCandidate]()
-        async let kugou = prefs.contains(.kuGou)
-            ? kuGou(title: title, artist: artist, duration: duration) : [LyricsCandidate]()
-        async let apple = prefs.contains(.appleMusic)
-            ? appleMusic(title: title, artist: artist, duration: duration) : [LyricsCandidate]()
-        async let yt = prefs.contains(.youTube)
-            ? youTube(videoId: videoId, title: title, artist: artist) : [LyricsCandidate]()
-        async let better = prefs.contains(.betterLyrics)
-            ? betterLyrics(title: title, artist: artist,
-                           videoId: videoId, duration: duration)
-            : [LyricsCandidate]()
-        async let customPlugins = PluginRuntime.fetchLyrics(title: title, artist: artist, videoId: videoId, duration: duration)
-        async let plus = prefs.contains(.lyricsPlus)
-            ? lyricsPlus(title: title, artist: artist, duration: duration) : [LyricsCandidate]()
-            let all = await customPlugins + apple + better + lrc + kugou + yt + plus
-        // Match quality first — that's what stops a confident-but-wrong result
-        // from a preferred provider winning. Then synced, then provider rank.
- // Provider order decides outright — the first
-        // provider that answers wins outright. Every provider already scores its
-        // OWN candidates and drops contradicted ones, so scoring is what picks
-        // the right release; using it to re-rank ACROSS providers quietly
-        // overruled the order set in Settings, which is how a song ended up on
- // LrcLib's line-level words when Apple had word-level ones.
+        let all = await withTaskGroup(of: [LyricsCandidate].self) { group -> [LyricsCandidate] in
+            if prefs.contains(.lrcLib) {
+                group.addTask { await lrcLib(title: title, artist: artist, duration: duration) }
+            }
+            if prefs.contains(.kuGou) {
+                group.addTask { await kuGou(title: title, artist: artist, duration: duration) }
+            }
+            if prefs.contains(.appleMusic) {
+                group.addTask { await appleMusic(title: title, artist: artist, duration: duration) }
+            }
+            if prefs.contains(.youTube) {
+                group.addTask { await youTube(videoId: videoId, title: title, artist: artist) }
+            }
+            if prefs.contains(.betterLyrics) {
+                group.addTask { await betterLyrics(title: title, artist: artist, videoId: videoId, duration: duration) }
+            }
+            group.addTask {
+                await PluginRuntime.fetchLyrics(title: title, artist: artist, videoId: videoId, duration: duration)
+            }
+            if prefs.contains(.lyricsPlus) {
+                group.addTask { await lyricsPlus(title: title, artist: artist, duration: duration) }
+            }
+
+            // Hard cutoff timer (2.6s) so a slow/stalled provider never blocks fast lyrics
+            group.addTask {
+                try? await Task.sleep(for: .milliseconds(2600))
+                return []
+            }
+
+            var collected: [LyricsCandidate] = []
+            var completedTasks = 0
+            let totalProviders = 7
+
+            for await batch in group {
+                completedTasks += 1
+                if !batch.isEmpty {
+                    collected.append(contentsOf: batch)
+                }
+                // Stop waiting early once the timeout sentinel fires or all providers finish
+                if completedTasks >= totalProviders {
+                    group.cancelAll()
+                    break
+                }
+            }
+            return collected
+        }
+
         return all.enumerated().sorted { a, b in
             let ra = prefs.rank(a.element.provider), rb = prefs.rank(b.element.provider)
             if ra != rb { return ra < rb }
             if a.element.score != b.element.score { return a.element.score > b.element.score }
             if a.element.synced != b.element.synced { return a.element.synced }
             return a.offset < b.offset
-           }.map { $0.element }
-}
+        }.map { $0.element }
+    }
 
     /// How well a search result matches the song we actually want. Ported from
     /// Paxsenix's `scoreAndFilterResults`: duration dominates, then the title,
