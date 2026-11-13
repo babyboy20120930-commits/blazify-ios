@@ -278,7 +278,7 @@ struct MVPlayerSheet: View {
         .statusBarHidden(true)
         .onAppear {
             if player.isPlaying {
-                player.togglePlayPause()
+                player.togglePlay()
             }
             if let track = player.current {
                 vm.load(for: track, maxHeight: preferredVideoHeight, startAt: 0)
@@ -287,7 +287,7 @@ struct MVPlayerSheet: View {
         }
         .onChange(of: player.current?.videoId) { _ in
             if let track = player.current {
-                if player.isPlaying { player.togglePlayPause() }
+                if player.isPlaying { player.togglePlay() }
                 vm.load(for: track, maxHeight: preferredVideoHeight, startAt: 0)
             }
         }
