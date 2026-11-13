@@ -7,11 +7,58 @@ actor AutoMixEngine {
 
     struct TrackMixProfile: Sendable {
         let bpm: Double
-        let firstBeat: TimeInterval      // First strong downbeat in intro
-        let outroStartOffset: TimeInterval // Seconds before track end where energy drops (ideal mix-out)
+        let firstBeat: TimeInterval
+        let outroStartOffset: TimeInterval
+        let cleanIntroScore: Double // Higher = cleaner instrumental/beat intro without abrupt vocal clash
+        let averageEnergy: Float
     }
 
     private var profileCache: [String: TrackMixProfile] = [:]
+
+    /// Ranks upcoming candidate tracks by analyzing their intro instrumental cleanliness,
+    /// backing energy continuity, and BPM compatibility against the currently playing track's outro.
+    func pickBestNextCandidate(
+        outgoingURL: URL?,
+        outgoingId: String,
+        candidates: [(index: Int, track: Track, url: URL?)]
+    ) async -> Int? {
+        guard !candidates.isEmpty else { return nil }
+        let outProfile = await analyze(url: outgoingURL, id: outgoingId, tail: true)
+
+        var bestIndex = candidates[0].index
+        var bestTotalScore = -Double.infinity
+
+        for cand in candidates.prefix(5) {
+            let inProfile = await analyze(url: cand.url, id: cand.track.videoId, tail: false)
+            var score = 0.0
+
+            if let inP = inProfile {
+                // 1. Reward clean instrumental / beat-driven intros (0..45 pts)
+                score += inP.cleanIntroScore * 45.0
+
+                if let outP = outProfile {
+                    // 2. Reward BPM / half-double tempo compatibility (0..40 pts)
+                    if outP.bpm > 55 && inP.bpm > 55 {
+                        var adjIn = inP.bpm
+                        if adjIn < outP.bpm * 0.72 { adjIn *= 2.0 }
+                        if adjIn > outP.bpm * 1.38 { adjIn /= 2.0 }
+                        let diffRatio = abs(outP.bpm - adjIn) / outP.bpm
+                        score += max(0, (1.0 - diffRatio * 5.0)) * 40.0
+                    }
+
+                    // 3. Reward smooth backing energy continuity (0..15 pts)
+                    let energyDiff = abs(Double(outP.averageEnergy - inP.averageEnergy))
+                    score += max(0, (1.0 - energyDiff * 3.0)) * 15.0
+                }
+            }
+
+            if score > bestTotalScore {
+                bestTotalScore = score
+                bestIndex = cand.index
+            }
+        }
+        return bestIndex
+    }
 
     func computeTransition(
         outgoingURL: URL?,
@@ -30,20 +77,16 @@ actor AutoMixEngine {
             return (baseSpeed, baseSpeed, inProfile?.firstBeat ?? 0, false)
         }
 
-        // Normalize half/double tempo (e.g., 72 BPM R&B vs 144 BPM Trap/Pop)
         var targetInBPM = inP.bpm
         if targetInBPM < outP.bpm * 0.72 { targetInBPM *= 2.0 }
         if targetInBPM > outP.bpm * 1.38 { targetInBPM /= 2.0 }
 
         let ratio = Float(outP.bpm / targetInBPM)
-        // Allow up to ±14% seamless tempo lock
         let clampedRatio = min(max(ratio, 0.86), 1.14)
 
-        // Snap seekOffset to the first strong downbeat so intro silence is skipped cleanly
         let beatPeriod = 60.0 / targetInBPM
         var alignedOffset = inP.firstBeat
         if alignedOffset > 8.0 {
-            // Keep within reasonable intro range while staying locked to a 4-beat bar boundary
             let barLength = beatPeriod * 4.0
             alignedOffset = alignedOffset.truncatingRemainder(dividingBy: barLength)
         }
@@ -51,16 +94,16 @@ actor AutoMixEngine {
         return (baseSpeed * clampedRatio, baseSpeed, max(0, alignedOffset), true)
     }
 
-    /// Returns optimal mix window duration (seconds) tailored to the outgoing track's outro energy.
     func optimalMixDuration(for url: URL?, id: String, fallback: Double) async -> Double {
         if let profile = await analyze(url: url, id: id, tail: true), profile.outroStartOffset >= 4.0 {
-            return min(max(profile.outroStartOffset, 5.0), 14.0)
+            return min(max(profile.outroStartOffset, 4.5), 14.0)
         }
         return fallback
     }
 
     private func analyze(url: URL?, id: String, tail: Bool) async -> TrackMixProfile? {
-        if !id.isEmpty, let cached = profileCache[id] { return cached }
+        let cacheKey = "\(id)_\(tail ? "tail" : "head")"
+        if !id.isEmpty, let cached = profileCache[cacheKey] { return cached }
 
         let resolvedURL: URL? = await MainActor.run {
             if let own = LocalMusic.shared.localAudioURL(for: id) { return own }
@@ -83,7 +126,7 @@ actor AutoMixEngine {
             guard totalSec.isFinite, totalSec > 8.0 else { return nil }
 
             let reader = try AVAssetReader(asset: asset)
-            let windowSec = min(totalSec, 24.0)
+            let windowSec = min(totalSec, 22.0)
             let startSec = tail ? max(0, totalSec - windowSec) : 0
             reader.timeRange = CMTimeRange(
                 start: CMTime(seconds: startSec, preferredTimescale: 600),
@@ -125,7 +168,6 @@ actor AutoMixEngine {
 
             guard samples.count > 44100 else { return nil }
 
-            // 20ms hop (50 Hz envelope)
             let hop = Int(22050.0 * 0.02)
             let envCount = samples.count / hop
             guard envCount > 150 else { return nil }
@@ -144,26 +186,35 @@ actor AutoMixEngine {
             vDSP_maxv(env, 1, &peak, vDSP_Length(envCount))
             guard peak > 0.001 else { return nil }
 
-            // 1. Detect first strong beat onset in intro
+            var meanEnergy: Float = 0
+            vDSP_meanv(env, 1, &meanEnergy, vDSP_Length(envCount))
+
+            // 1. Detect first strong beat onset & measure clean instrumental intro ratio
             var onset = [Float](repeating: 0, count: envCount)
             var firstBeatIdx = 0
+            var gradualIntroFrames = 0
+            let introCheckLimit = min(envCount, 300) // first 6 seconds
             for i in 1..<envCount {
                 let diff = max(0, env[i] - env[i - 1])
                 onset[i] = diff
                 if firstBeatIdx == 0 && env[i] > peak * 0.34 && diff > peak * 0.08 {
                     firstBeatIdx = i
                 }
+                if i < introCheckLimit && env[i] < peak * 0.65 {
+                    gradualIntroFrames += 1
+                }
             }
+            let cleanIntro = Double(gradualIntroFrames) / Double(max(introCheckLimit, 1))
 
-            // 2. Detect outro energy drop point (where song transitions into instrumental tail)
-            var outroDropSec: TimeInterval = 8.0
+            // 2. Detect dynamic outro energy drop point
+            var outroDropSec: TimeInterval = 7.5
             if tail {
-                let threshold = peak * 0.42
-                for i in stride(from: envCount - 1, through: envCount / 3, by: -1) {
+                let threshold = peak * 0.44
+                for i in stride(from: envCount - 1, through: envCount / 4, by: -1) {
                     if env[i] > threshold {
                         let tailFrames = envCount - 1 - i
                         let detected = Double(tailFrames) * 0.02
-                        if detected >= 3.5 && detected <= 15.0 {
+                        if detected >= 4.0 && detected <= 15.0 {
                             outroDropSec = detected
                         }
                         break
@@ -182,7 +233,7 @@ actor AutoMixEngine {
                     var dot: Float = 0
                     let len = envCount - lag
                     vDSP_dotpr(onset, 1, Array(onset[lag..<envCount]), 1, &dot, vDSP_Length(len))
-                    let score = dot / Float(len)
+                                        let score = dot / Float(len)
                     if score > bestScore {
                         bestScore = score
                         bestLag = lag
@@ -194,10 +245,12 @@ actor AutoMixEngine {
             let profile = TrackMixProfile(
                 bpm: bpm,
                 firstBeat: Double(firstBeatIdx) * 0.02,
-                outroStartOffset: outroDropSec
+                outroStartOffset: outroDropSec,
+                cleanIntroScore: cleanIntro,
+                averageEnergy: meanEnergy / max(peak, 0.001)
             )
             if !id.isEmpty, bpm > 0 {
-                profileCache[id] = profile
+                profileCache[cacheKey] = profile
             }
             return profile
         } catch {
