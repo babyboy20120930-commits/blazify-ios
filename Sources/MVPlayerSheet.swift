@@ -26,7 +26,7 @@ struct MVPlayerSheet: View {
             // Video viewport
             if let avPlayer = vm.avPlayer {
                 TheaterVideoSurface(player: avPlayer)
-                    .ignoresSafeArea()S
+                    .ignoresSafeArea()
                     .onTapGesture { toggleControls() }
             }
 
