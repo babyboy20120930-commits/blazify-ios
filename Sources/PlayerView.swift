@@ -1103,7 +1103,7 @@ private var isPadLandscape: Bool {
                 if fullArtDrawerOpen {
                     VStack(spacing: 14) {
                         sidebarIcon("backward.fill", label: "Prev") {
-                            player.previous()
+                            player.prev()
                         }
                         sidebarIcon("forward.fill", label: "Next") {
                             player.next()
