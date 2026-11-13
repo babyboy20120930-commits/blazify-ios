@@ -1030,18 +1030,47 @@ private var isPadLandscape: Bool {
                             .shadow(color: .black.opacity(0.75), radius: 3, y: 1)
                     }
 
-                    // Slim draggable progress bar
+                    // Slim draggable progress bar with Auto Mix zone highlight
                     GeometryReader { geo in
                         let w = max(1, geo.size.width)
+                        let barH: CGFloat = scrub != nil ? 6 : 4
                         let currentVal = scrub ?? player.currentTime
                         let ratio = player.duration > 0 ? min(max(currentVal / player.duration, 0), 1) : 0
+
+                        // Calculate Auto Mix highlight region at the tail of the track
+                        let prefs = PlaybackPrefs.shared
+                        let mixEnabled = prefs.crossfade && prefs.beatSyncMix && player.duration > prefs.crossfadeDuration + 2
+                        let mixRatio = mixEnabled ? min(max(prefs.crossfadeDuration / player.duration, 0), 0.45) : 0
+                        let mixWidth = w * mixRatio
+                        let mixStartX = max(0, w - mixWidth)
+
                         ZStack(alignment: .leading) {
+                            // 1. Base track background
                             Capsule()
-                                .fill(Color.white.opacity(0.28))
-                                .frame(height: scrub != nil ? 6 : 4)
+                                .fill(Color.white.opacity(0.24))
+                                .frame(height: barH)
+
+                            // 2. Highlighted light-white Auto Mix zone at the tail
+                            if mixWidth > 2 {
+                                Capsule()
+                                    .fill(player.crossfading ? Color.white.opacity(0.85) : Color.white.opacity(0.52))
+                                    .frame(width: mixWidth, height: barH)
+                                    .offset(x: mixStartX)
+                                    .shadow(color: player.crossfading ? Color.white.opacity(0.6) : .clear, radius: 4)
+
+                                // Subtle tick mark showing exact Auto Mix entry point
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.9))
+                                    .frame(width: 1.5, height: barH + 4)
+                                    .offset(x: mixStartX)
+                            }
+
+                            // 3. Played progress fill
                             Capsule()
                                 .fill(Color.white)
-                                .frame(width: w * ratio, height: scrub != nil ? 6 : 4)
+                                .frame(width: w * ratio, height: barH)
+
+                            // 4. Scrubber thumb
                             Circle()
                                 .fill(Color.white)
                                 .frame(width: scrub != nil ? 14 : 10, height: scrub != nil ? 14 : 10)
