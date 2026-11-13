@@ -982,7 +982,7 @@ private var isPadLandscape: Bool {
                     HStack(alignment: .center, spacing: 12) {
                         // Compact Play/Pause button positioned directly above the far-left of the progress bar
                         Button {
-                            player.togglePlayPause()
+                            player.togglePlay()
                         } label: {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 14, weight: .bold))
