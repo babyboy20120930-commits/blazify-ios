@@ -744,13 +744,17 @@ private var isPadLandscape: Bool {
             if !immersive {
                 ZStack {
                     HStack(spacing: 0) {
-                        HStack(spacing: 14) {
+                             HStack(spacing: 14) {
                             iPadControlIcon("shuffle", active: player.isShuffled) {
-                                player.toggleShuffle()
+                            player.toggleShuffle()
+                            }
+                            iPadControlIcon("sparkles", active: player.smartDJQueue) {
+                            player.smartDJQueue.toggle()
                             }
                             iPadControlIcon("backward.end.fill") {
-                                player.prev()
+                            player.prev()
                             }
+
                             iPadControlIcon("forward.end.fill") {
                                 _ = player.next()
                             }
