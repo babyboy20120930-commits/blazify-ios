@@ -1151,6 +1151,11 @@ private var isPadLandscape: Bool {
                                     active: player.isShuffled) {
                             player.toggleShuffle()
                         }
+                        sidebarIcon("sparkles",
+                        label: "AutoMix DJ",
+                        active: player.smartDJQueue) {
+                        player.smartDJQueue.toggle()
+                        }
                         sidebarIcon(player.repeatMode == .one ? "repeat.1" : "repeat",
                                     label: "Repeat",
                                     active: player.repeatMode != .off) {
