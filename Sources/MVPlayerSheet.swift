@@ -384,7 +384,7 @@ private final class TheaterMVController: ObservableObject {
             let vPlayer = buildAVPlayer(url: found.url, muted: false)
 
             if !isHLS {
-                if let audioInfo = await YouTube.stream(for: targetVideoId) {
+                if let audioInfo = await YouTube.streamURL(for: targetVideoId) {
                     vPlayer.isMuted = true
                     let aPlayer = buildAVPlayer(url: audioInfo.url, muted: false)
                     self.backupAudioPlayer = aPlayer
