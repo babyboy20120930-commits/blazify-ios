@@ -32,7 +32,8 @@ struct PlayerView: View {
     @State private var lyricsOffset: Double = 0
     @State private var lyricsMode = false
     @State private var fullScreenMV = false
-     @State private var showWatchMV = false
+    @State private var showWatchMV = false
+    @State private var fullArtDrawerOpen = false
     @State private var immersive = false
     /// Offered once, the first time the Video design meets mobile data: the cover
     /// is showing instead of the video, and this is where to say that videos may
@@ -422,7 +423,9 @@ private var isPadLandscape: Bool {
                     .frame(height: stageHeight)
                     .padding(.horizontal, 32)
                 }
-            case .fullArt, .video:
+            case .fullArt:
+                fullArtMinimalLayout
+            case .video:
                 standardLayout { Color.clear.frame(height: stageHeight) }
             }
         }
@@ -960,8 +963,255 @@ private var isPadLandscape: Bool {
 
 
     // MARK: Header
+    // MARK: Minimal Full-Art Layout (Bottom mini play + progress + Left collapsible sidebar)
+@ViewBuilder private var fullArtMinimalLayout: some View {
+        ZStack(alignment: .leading) {
+            VStack(spacing: 0) {
+                header
 
-    @ViewBuilder private var header: some View {
+                // Double-tap anywhere in the open center to seek ±step seconds
+                GeometryReader { geo in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { pt in
+                            jump(back: pt.x < geo.size.width / 2)
+                        }
+                }
+
+                // Bottom minimal dock: Compact Play/Pause at top-left of progress bar + slim scrubber
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .center, spacing: 12) {
+                        // Compact Play/Pause button positioned directly above the far-left of the progress bar
+                        Button {
+                            player.togglePlayPause()
+                        } label: {
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.28), lineWidth: 0.6))
+                                .shadow(color: .black.opacity(0.45), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(player.current?.title ?? "")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .shadow(color: .black.opacity(0.75), radius: 4, y: 2)
+                            if let artist = player.current?.artist, !artist.isEmpty {
+                                Text(artist)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.82))
+                                    .lineLimit(1)
+                                    .shadow(color: .black.opacity(0.75), radius: 3, y: 1)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        // Heart + Timecode on the right
+                        Button {
+                            player.toggleFavorite()
+                        } label: {
+                            Image(systemName: player.isCurrentFavorite ? "heart.fill" : "heart")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(player.isCurrentFavorite ? .red : .white.opacity(0.85))
+                                .frame(width: 32, height: 32)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("\(formatMinimalTime(scrub ?? player.currentTime)) / \(formatMinimalTime(player.duration))")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .shadow(color: .black.opacity(0.75), radius: 3, y: 1)
+                    }
+
+                    // Slim draggable progress bar
+                    GeometryReader { geo in
+                        let w = max(1, geo.size.width)
+                        let currentVal = scrub ?? player.currentTime
+                        let ratio = player.duration > 0 ? min(max(currentVal / player.duration, 0), 1) : 0
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.white.opacity(0.28))
+                                .frame(height: scrub != nil ? 6 : 4)
+                            Capsule()
+                                .fill(Color.white)
+                                .frame(width: w * ratio, height: scrub != nil ? 6 : 4)
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: scrub != nil ? 14 : 10, height: scrub != nil ? 14 : 10)
+                                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+                                .offset(x: max(0, min(w - 10, w * ratio - 5)))
+                        }
+                        .frame(height: 20)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { val in
+                                    let r = min(max(val.location.x / w, 0), 1)
+                                    scrub = r * player.duration
+                                }
+                                .onEnded { val in
+                                    let r = min(max(val.location.x / w, 0), 1)
+                                    player.seek(to: r * player.duration)
+                                    scrub = nil
+                                }
+                        )
+                    }
+                    .frame(height: 20)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+            }
+            .padding(.top, 6)
+
+            // Left collapsible glass sidebar drawer
+            HStack(spacing: 0) {
+                if fullArtDrawerOpen {
+                    VStack(spacing: 14) {
+                        sidebarIcon("backward.fill", label: "Prev") {
+                            player.previous()
+                        }
+                        sidebarIcon("forward.fill", label: "Next") {
+                            player.next()
+                        }
+                        sidebarIcon(player.shuffle ? "shuffle.circle.fill" : "shuffle",
+                                    label: "Shuffle",
+                                    active: player.shuffle) {
+                            player.toggleShuffle()
+                        }
+                        sidebarIcon(repeatIconName,
+                                    label: "Repeat",
+                                    active: player.repeatMode != .off) {
+                            player.cycleRepeat()
+                        }
+
+                        Divider()
+                            .background(Color.white.opacity(0.25))
+                            .frame(width: 28)
+
+                        // Vertical volume control
+                        VStack(spacing: 6) {
+                            Image(systemName: player.volume <= 0.01 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .onTapGesture {
+                                    player.volume = player.volume > 0.01 ? 0 : 0.8
+                                }
+                            GeometryReader { vGeo in
+                                let h = max(1, vGeo.size.height)
+                                let vRatio = CGFloat(min(max(player.volume, 0), 1))
+                                ZStack(alignment: .bottom) {
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.25))
+                                        .frame(width: 4)
+                                    Capsule()
+                                        .fill(Color.white)
+                                        .frame(width: 4, height: h * vRatio)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { g in
+                                            let r = 1.0 - min(max(g.location.y / h, 0), 1)
+                                            player.volume = Float(r)
+                                        }
+                                )
+                            }
+                            .frame(width: 24, height: 74)
+                        }
+
+                        Divider()
+                            .background(Color.white.opacity(0.25))
+                            .frame(width: 28)
+
+                        sidebarIcon(player.sleepActive ? "moon.zzz.fill" : "moon.zzz",
+                                    label: "Sleep",
+                                    active: player.sleepActive) {
+                            showSleep = true
+                        }
+                        sidebarIcon("quote.bubble", label: "Lyrics") {
+                            lyricsMode = true
+                        }
+                        sidebarIcon("paintpalette", label: "Theme") {
+                            showDesign = true
+                        }
+                        sidebarIcon("ellipsis", label: "More") {
+                            showMenu = true
+                        }
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
+                    )
+
+                    .shadow(color: .black.opacity(0.45), radius: 14, x: 4, y: 4)
+                    .padding(.leading, 12)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+
+                // Compact edge handle button to expand/collapse sidebar
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                        fullArtDrawerOpen.toggle()
+                    }
+                } label: {
+                    Image(systemName: fullArtDrawerOpen ? "chevron.left" : "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 48)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.22), lineWidth: 0.6)
+                        )
+                        .shadow(color: .black.opacity(0.4), radius: 6, x: 2, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 6)
+            }
+            .padding(.bottom, 60)
+        }
+    }
+
+    private var repeatIconName: String {
+        switch player.repeatMode {
+        case .one: return "repeat.1"
+        default: return "repeat"
+        }
+    }
+
+    @ViewBuilder private func sidebarIcon(_ systemName: String, label: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(active ? Blaze.amber : .white)
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(active ? Blaze.amber : .white.opacity(0.75))
+            }
+            .frame(width: 40, height: 34)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func formatMinimalTime(_ sec: Double) -> String {
+        guard sec.isFinite, sec >= 0 else { return "0:00" }
+        let total = Int(sec)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+    
+@ViewBuilder private var header: some View {
         ZStack {
             // The lyrics page is the words and nothing else; "Now Playing" over
             // them is the one heading that says nothing you cannot see.
