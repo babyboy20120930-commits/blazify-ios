@@ -71,9 +71,10 @@ struct LyricsPane: View {
     @State private var offlineTranslationOn = false
     @State private var offlineTranslatedLines: [Int: String] = [:]
     @State private var offlineTranslatedPlain: String?
-    #if canImport(Translation)
-    @State private var translationConfig: TranslationSession.Configuration?
-    #endif
+   #if canImport(Translation)
+   @State private var translationConfig: Any?
+   #endif
+
 
 
     private let anchorRatio: CGFloat = 0.35
@@ -894,10 +895,11 @@ extension LyricsPane {
                 return
             }
 
-            if translationConfig == nil {
-                translationConfig = TranslationSession.Configuration(source: sourceLocale, target: targetLocale)
+            if var existing = translationConfig as? TranslationSession.Configuration {
+                existing.invalidate()
+                translationConfig = existing
             } else {
-                translationConfig?.invalidate()
+                translationConfig = TranslationSession.Configuration(source: sourceLocale, target: targetLocale)
             }
         }
         #endif
@@ -906,14 +908,14 @@ extension LyricsPane {
 
 #if canImport(Translation)
 private struct OfflineTranslationModifier: ViewModifier {
-    let configuration: TranslationSession.Configuration?
+    let configuration: Any?
     let lines: [LyricLine]
     let plain: String?
     let onTranslated: @MainActor ([Int: String], String?) -> Void
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.translationTask(configuration) { session in
+            content.translationTask(configuration as? TranslationSession.Configuration) { session in
                 do {
                     if !lines.isEmpty {
                         let requests = lines.enumerated().compactMap { idx, line -> TranslationSession.Request? in
@@ -929,10 +931,10 @@ private struct OfflineTranslationModifier: ViewModifier {
                                 map[idx] = res.targetText
                             }
                         }
-                        await onTranslated(map, nil)
+                        onTranslated(map, nil)
                     } else if let plain, !plain.isEmpty {
                         let response = try await session.translate(plain)
-                        await onTranslated([:], response.targetText)
+                        onTranslated([:], response.targetText)
                     }
                 } catch {
                 }
