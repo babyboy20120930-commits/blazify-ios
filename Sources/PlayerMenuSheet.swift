@@ -134,6 +134,18 @@ struct PlayerMenuSheet: View {
                     playback.crossfade = nextState
                     playback.beatSyncMix = nextState
                     }
+                    row("sparkles",
+                    player.smartDJQueue
+                    ? String(localized: "AutoMix DJ (Smart Intro): On")
+                    : String(localized: "AutoMix DJ (Smart Intro): Off"),
+                    tint: player.smartDJQueue ? Blaze.amber : .white) {
+                    player.smartDJQueue.toggle()
+                    if player.smartDJQueue {
+                    playback.crossfade = true
+                    playback.beatSyncMix = true
+                        }
+                    }
+
 
 
     
