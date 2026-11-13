@@ -89,46 +89,65 @@ enum Lyrics {
                        duration: Double = 0) async -> [LyricsCandidate] {
         let prefs = await MainActor.run { LyricsPrefs.shared.snapshot() }
 
-        let all = await withTaskGroup(of: [LyricsCandidate].self) { group -> [LyricsCandidate] in
+        // Clean noisy YouTube tags like "(Official Video)", "[MV]", "歌詞版" so providers match reliably
+        let cleanTitle = title
+            .replacingOccurrences(of: #"\s*[\(\[【（](official|mv|music video|lyric|lyrics|audio|live|hd|4k|hq|純享|動態歌詞|歌詞).*?[\)\]】）]"#,
+                                  with: "",
+                                  options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryTitle = cleanTitle.isEmpty ? title : cleanTitle
+
+        let all = await withTaskGroup(of: (isTimeout: Bool, items: [LyricsCandidate]).self) { group -> [LyricsCandidate] in
+            var activeProviders = 0
             if prefs.contains(.lrcLib) {
-                group.addTask { await lrcLib(title: title, artist: artist, duration: duration) }
+                activeProviders += 1
+                group.addTask { (false, await lrcLib(title: queryTitle, artist: artist, duration: duration)) }
             }
             if prefs.contains(.kuGou) {
-                group.addTask { await kuGou(title: title, artist: artist, duration: duration) }
+                activeProviders += 1
+                group.addTask { (false, await kuGou(title: queryTitle, artist: artist, duration: duration)) }
             }
             if prefs.contains(.appleMusic) {
-                group.addTask { await appleMusic(title: title, artist: artist, duration: duration) }
+                activeProviders += 1
+                group.addTask { (false, await appleMusic(title: queryTitle, artist: artist, duration: duration)) }
             }
             if prefs.contains(.youTube) {
-                group.addTask { await youTube(videoId: videoId, title: title, artist: artist) }
+                activeProviders += 1
+                group.addTask { (false, await youTube(videoId: videoId, title: queryTitle, artist: artist)) }
             }
             if prefs.contains(.betterLyrics) {
-                group.addTask { await betterLyrics(title: title, artist: artist, videoId: videoId, duration: duration) }
+                activeProviders += 1
+                group.addTask { (false, await betterLyrics(title: queryTitle, artist: artist, videoId: videoId, duration: duration)) }
             }
+            activeProviders += 1
             group.addTask {
-                await PluginRuntime.fetchLyrics(title: title, artist: artist, videoId: videoId, duration: duration)
+                (false, await PluginRuntime.fetchLyrics(title: queryTitle, artist: artist, videoId: videoId, duration: duration))
             }
             if prefs.contains(.lyricsPlus) {
-                group.addTask { await lyricsPlus(title: title, artist: artist, duration: duration) }
+                activeProviders += 1
+                group.addTask { (false, await lyricsPlus(title: queryTitle, artist: artist, duration: duration)) }
             }
 
-            // Hard cutoff timer (2.6s) so a slow/stalled provider never blocks fast lyrics
+            // Generous 5.5s hard timeout so slower overseas providers (Apple/KuGou/BetterLyrics) still succeed
             group.addTask {
-                try? await Task.sleep(for: .milliseconds(2600))
-                return []
+                try? await Task.sleep(for: .milliseconds(5500))
+                return (true, [])
             }
 
             var collected: [LyricsCandidate] = []
-            var completedTasks = 0
-            let totalProviders = 7
+            var finishedProviders = 0
 
-            for await batch in group {
-                completedTasks += 1
-                if !batch.isEmpty {
-                    collected.append(contentsOf: batch)
+            for await result in group {
+                if result.isTimeout {
+                    group.cancelAll()
+                    break
                 }
-                // Stop waiting early once the timeout sentinel fires or all providers finish
-                if completedTasks >= totalProviders {
+                finishedProviders += 1
+                if !result.items.isEmpty {
+                    collected.append(contentsOf: result.items)
+                }
+                // If all providers finished, return immediately
+                if finishedProviders >= activeProviders {
                     group.cancelAll()
                     break
                 }
