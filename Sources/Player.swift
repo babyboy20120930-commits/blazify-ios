@@ -161,6 +161,19 @@ final class Player: ObservableObject {
     @Published private(set) var crossfading = false
     @Published private(set) var beatSyncedMix = false
     @Published var audioQualityBadge: String = "HIGH"
+    @Published var smartDJQueue: Bool = UserDefaults.standard.bool(forKey: "smartDJQueue") {
+    didSet {
+    UserDefaults.standard.set(smartDJQueue, forKey: "smartDJQueue")
+    if smartDJQueue && isShuffled {
+                toggleShuffle()
+            }
+        }
+    }
+    private var dynamicMixWindow: Double?
+    private var analyzedWindowForId: String?
+    private var smartPickedForId: String?
+    private var earlyUISwitched = false
+
     /// The next track, already built and buffered but paused. Swapping to this
     /// on end is what removes the gap — loading from scratch is the gap.
     private var preparedPlayer: AVPlayer?
@@ -510,6 +523,9 @@ final class Player: ObservableObject {
     func toggleShuffle() {
         defer { saveModes() }
         isShuffled.toggle()
+        if isShuffled && smartDJQueue {
+            smartDJQueue = false
+        }
         guard let cur = current else { return }
         if isShuffled {
             applyShuffle()
@@ -518,7 +534,6 @@ final class Player: ObservableObject {
             index = originalQueue.firstIndex(of: cur) ?? 0
         }
     }
-
     /// Keep the current track, shuffle everything else after it.
     private func applyShuffle() {
         guard let cur = current else { return }
@@ -1687,10 +1702,52 @@ final class Player: ObservableObject {
               repeatMode != .one, duration > 0,
               queue.indices.contains(index + 1)
         else { return }
-        let window = prefs.crossfadeDuration
-        guard duration - currentTime <= window, duration - currentTime > 0.2 else { return }
+
+        let remaining = duration - currentTime
+        let curTrack = current
+        let curId = curTrack?.videoId ?? ""
+
+        // 1. Pre-analyze dynamic outro window & Smart DJ intro match ~22s before track end
+        if remaining <= 22.0 && remaining > 4.0 && analyzedWindowForId != curId {
+            analyzedWindowForId = curId
+            let outURL = (avPlayer?.currentItem?.asset as? AVURLAsset)?.url
+            let fallbackWin = prefs.crossfadeDuration
+            Task { @MainActor [weak self] in
+                guard let self, self.current?.videoId == curId else { return }
+                let opt = await AutoMixEngine.shared.optimalMixDuration(for: outURL, id: curId, fallback: fallbackWin)
+                self.dynamicMixWindow = opt
+
+                // Smart DJ Auto-Select: scan upcoming candidates' intros & tempo to pick the smoothest match
+                if self.smartDJQueue && self.smartPickedForId != curId && self.queue.count > self.index + 2 {
+                    self.smartPickedForId = curId
+                    let startIdx = self.index + 1
+                    let endIdx = min(self.queue.count, startIdx + 5)
+                    var candidates: [(index: Int, track: Track, url: URL?)] = []
+                    for idx in startIdx..<endIdx {
+                        let t = self.queue[idx]
+                        let u = LocalMusic.shared.localAudioURL(for: t.videoId)
+                            ?? Downloads.shared.localAudioURL(for: t.videoId)
+                            ?? AudioCache.shared.cachedURL(for: t.videoId)
+                        candidates.append((idx, t, u))
+                    }
+                    if let bestIdx = await AutoMixEngine.shared.pickBestNextCandidate(
+                        outgoingURL: outURL,
+                        outgoingId: curId,
+                        candidates: candidates
+                    ), bestIdx != startIdx, self.queue.indices.contains(bestIdx), !self.crossfading {
+                        let chosen = self.queue.remove(at: bestIdx)
+                        self.queue.insert(chosen, at: startIdx)
+                        self.discardPrepared()
+                    }
+                }
+            }
+        }
+
+        let window = dynamicMixWindow ?? prefs.crossfadeDuration
+        guard remaining <= window, remaining > 0.2 else { return }
 
         crossfading = true
+        earlyUISwitched = false
         let upcoming = queue[index + 1]
         Task { @MainActor in
             guard let resolved = await self.resolved(for: upcoming) else {
@@ -1706,9 +1763,9 @@ final class Player: ObservableObject {
     /// a download, then the cache, then the network. Both halves matter — see
     /// `preparedDuration`.
     private func resolved(for track: Track) async -> (url: URL, duration: Double)? {
-    if let pluginStream = await PluginRuntime.resolveAudioStream(for: track) {
-    self.audioQualityBadge = "FLAC"
-    return (pluginStream, track.duration)
+        if let pluginStream = await PluginRuntime.resolveAudioStream(for: track) {
+            self.audioQualityBadge = "FLAC"
+            return (pluginStream, track.duration)
         }
         let q = String(describing: PlaybackPrefs.shared.quality).lowercased()
         self.audioQualityBadge = (q.contains("low") || q.contains("data") || q.contains("saver")) ? "LOW" : "HIGH"
@@ -1726,7 +1783,7 @@ final class Player: ObservableObject {
         return (stream.url, stream.duration)
     }
 
-private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
+    private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
         guard let outgoing = avPlayer else { crossfading = false; return }
 
         let prefs = PlaybackPrefs.shared
@@ -1801,18 +1858,30 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
                 guard let self else { timer.invalidate(); return }
                 step += 1
                 let t = min(Double(step) / Double(steps), 1.0)
-                // Smooth S-curve (Hermite interpolation) for natural DJ energy handoff
                 let sCurve = t * t * (3.0 - 2.0 * t)
                 let angle = Float(sCurve * (.pi / 2.0))
 
-                // Equal-power S-curve volume blend
                 outgoing.volume = startVolume * cos(angle)
                 incoming.volume = targetVolume * sin(angle)
 
-                // Gradually glide incoming track tempo back to natural speed across the entire blend
                 if transition.beatSynced {
-                let glide = Float(sCurve)
-                incoming.rate = transition.startRate + (transition.targetRate - transition.startRate) * glide
+                    let glide = Float(sCurve)
+                    incoming.rate = transition.startRate + (transition.targetRate - transition.startRate) * glide
+                }
+
+                // Switch artwork, title & progress bar to the incoming track at the 50% energy midpoint!
+                if t >= 0.5 && !self.earlyUISwitched && self.index < self.queue.count - 1 {
+                    self.earlyUISwitched = true
+                    self.index += 1
+                    self.currentTime = incoming.currentTime().seconds
+                    self.duration = self.fadeDuration > 0 ? self.fadeDuration : (self.current?.duration ?? 0)
+                    self.adoptPlayingTrack(realDuration: self.fadeDuration)
+                }
+
+                // Keep progress bar smoothly tracking incoming song after 50% midpoint
+                if self.earlyUISwitched {
+                    let sec = incoming.currentTime().seconds
+                    if sec.isFinite { self.currentTime = sec }
                 }
 
                 guard step >= steps else { return }
@@ -1821,9 +1890,9 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
                 self.beatSyncedMix = false
                 self.finishCrossfade(volume: targetVolume)
             }
-
         }
     }
+
     /// Hand over to the faded-in player. Deliberately does NOT call
     /// `loadCurrent()` — that would build a third player and restart the song
     /// we've just spent the whole fade blending into. Everything except the
@@ -1831,7 +1900,11 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
     private func finishCrossfade(volume: Float) {
         fadeTimer?.invalidate()
         fadeTimer = nil
-        guard let incoming = fadePlayer, index < queue.count - 1 else {
+        guard let incoming = fadePlayer else {
+            cancelCrossfade()
+            return
+        }
+        if !earlyUISwitched && index >= queue.count - 1 {
             cancelCrossfade()
             return
         }
@@ -1845,10 +1918,17 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
         incoming.volume = volume
         fadePlayer = nil
         crossfading = false
+        dynamicMixWindow = nil
 
+        if !earlyUISwitched {
         index += 1
         adoptPlayingTrack(realDuration: fadeDuration)
+        } else {
+            attachObservers(to: incoming)
+        }
+        earlyUISwitched = false
         fadeDuration = 0
+
     }
 
     /// Refresh everything the UI and the system need for the track that is
