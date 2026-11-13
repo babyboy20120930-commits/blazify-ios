@@ -160,6 +160,7 @@ final class Player: ObservableObject {
     /// doesn't also try to advance.
     @Published private(set) var crossfading = false
     @Published private(set) var beatSyncedMix = false
+    @Published var audioQualityBadge: String = "HIGH"
     /// The next track, already built and buffered but paused. Swapping to this
     /// on end is what removes the gap — loading from scratch is the gap.
     private var preparedPlayer: AVPlayer?
@@ -1706,9 +1707,13 @@ final class Player: ObservableObject {
     /// `preparedDuration`.
     private func resolved(for track: Track) async -> (url: URL, duration: Double)? {
     if let pluginStream = await PluginRuntime.resolveAudioStream(for: track) {
-     return (pluginStream, track.duration)
- }
-    if let own = LocalMusic.shared.localAudioURL(for: track.videoId) {
+    self.audioQualityBadge = "FLAC"
+    return (pluginStream, track.duration)
+        }
+        let q = String(describing: PlaybackPrefs.shared.quality).lowercased()
+        self.audioQualityBadge = (q.contains("low") || q.contains("data") || q.contains("saver")) ? "LOW" : "HIGH"
+
+        if let own = LocalMusic.shared.localAudioURL(for: track.videoId) {
             return (own, LocalMusic.shared.duration(for: track.videoId) ?? track.duration)
         }
         if let local = Downloads.shared.localAudioURL(for: track.videoId) {
@@ -1720,6 +1725,7 @@ final class Player: ObservableObject {
         guard let stream = await YouTube.streamURL(for: track.videoId) else { return nil }
         return (stream.url, stream.duration)
     }
+
 private func startCrossfade(to url: URL, over seconds: Double, realDuration: Double) {
         guard let outgoing = avPlayer else { crossfading = false; return }
 
