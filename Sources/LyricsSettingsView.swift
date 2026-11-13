@@ -194,8 +194,9 @@ struct LyricsSettingsView: View {
             Text("This renderer is still in beta. It highlights each word as it's "
                  + "sung, marks instrumental breaks, and sets its own text size, "
                  + "so those options are hidden while it's on.")
+               }
+           }
         }
-    }
 
     // MARK: Building blocks
 
