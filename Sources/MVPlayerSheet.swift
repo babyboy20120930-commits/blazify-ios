@@ -229,7 +229,7 @@ struct MVPlayerSheet: View {
                                         .font(.system(size: 11, weight: .bold))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 3)
-                        A                .background(Color.white.opacity(0.16))
+                                        .background(Color.white.opacity(0.16))
                                         .clipShape(RoundedRectangle(cornerRadius: 4))
                                 }
 
