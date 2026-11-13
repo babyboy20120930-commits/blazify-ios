@@ -137,34 +137,50 @@ struct LyricsPane: View {
 
     // MARK: Header
 
-    @ViewBuilder private var header: some View {
-        if !immersive { headerRow }
-    }
+ // MARK: Header
 
-    private var headerRow: some View {
-        HStack {
-        if showOfflineTranslateBtn {
-            Button {
-            Task { await handleOfflineTranslateTap() }
-             } label: {
-            HStack(spacing: 4) {
-            Image(systemName: "translate")
-            if offlineTranslationOn {
-            Text("ON")
-            .font(.system(size: 11, weight: .bold))
-                     }
-                 }
-                 .font(.system(size: 13, weight: .semibold))
-                 .foregroundStyle(offlineTranslationOn ? .black : .white)
-                 .padding(.horizontal, 11).padding(.vertical, 7)
-                 .background(offlineTranslationOn ? Color.white : Color.white.opacity(0.15))
-                 .clipShape(Capsule())
-             }
-             .disabled(pickerDisabled)
-             .opacity(pickerDisabled ? 0.4 : 1)
+ @ViewBuilder private var header: some View {
+     if !immersive {
+         headerRow
+     } else if showOfflineTranslateBtn {
+         HStack {
+             offlineTranslateButton
+             Spacer()
          }
+         .padding(.horizontal, 22)
+         .padding(.top, 12)
+         .padding(.bottom, 4)
+     }
+ }
 
-            Spacer()
+ private var offlineTranslateButton: some View {
+     Button {
+         Task { await handleOfflineTranslateTap() }
+     } label: {
+         HStack(spacing: 4) {
+             Image(systemName: "translate")
+             if offlineTranslationOn {
+                 Text("ON")
+                     .font(.system(size: 11, weight: .bold))
+             }
+         }
+         .font(.system(size: 13, weight: .semibold))
+         .foregroundStyle(offlineTranslationOn ? .black : .white)
+         .padding(.horizontal, 11).padding(.vertical, 7)
+         .background(offlineTranslationOn ? Color.white : Color.white.opacity(0.15))
+         .clipShape(Capsule())
+     }
+     .disabled(pickerDisabled)
+     .opacity(pickerDisabled ? 0.4 : 1)
+ }
+
+ private var headerRow: some View {
+     HStack {
+         if showOfflineTranslateBtn {
+             offlineTranslateButton
+         }
+         Spacer()
+
             if !autoScroll {
                 Button { resync() } label: {
                     Text("Auto scroll")
