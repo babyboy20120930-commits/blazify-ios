@@ -10,6 +10,7 @@ struct PlayerSettingsView: View {
     @Environment(\.palette) private var palette
     @ObservedObject private var prefs = PlaybackPrefs.shared
     @State private var showQuality = false
+    @State private var showAudioExtensions = false
     @State private var showHistory = false
     @State private var showSponsorCategories = false
 
@@ -69,12 +70,11 @@ struct PlayerSettingsView: View {
 
 
                 SettingsDivider()
-                NavigationLink { ExtensionManagerView(filterKind: .audio) } label: {
-                    SettingsLink(symbol: "waveform.badge.plus", title: "Audio extensions",
-                                 subtitle: "Import JSON links or files for external audio sources") {}
-                        .allowsHitTesting(false)
-                }
-                .buttonStyle(.plain)
+                SettingsLink(symbol: "waveform.badge.plus", title: "Audio extensions",
+                subtitle: "Import JSON links or files for external audio sources") {
+                  showAudioExtensions = true
+              }
+
 
 
             }
@@ -211,6 +211,12 @@ struct PlayerSettingsView: View {
                              label: PlaybackPrefs.historyTitle,
                              selection: $prefs.historyDays)
         }
+        .sheet(isPresented: $showAudioExtensions) {
+        NavigationStack {
+        ExtensionManagerView(filterKind: .audio)
+            }
+        }
+
     }
 }
 
