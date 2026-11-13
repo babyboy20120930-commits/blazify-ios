@@ -638,24 +638,38 @@ private var isPadLandscape: Bool {
         videoLoader.prepareNext(player.upNext, allowed: allowed, maxHeight: height)
     }
 
-     private var fullArtBackground: some View {
+    private var fullArtBackground: some View {
         GeometryReader { geo in
-            RemoteImage(url: player.current?.artURL(size: 1280)) { Color.black }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: isPadLandscape ? .top : .center)
-                .clipped()
-                .overlay(
-                    LinearGradient(stops: [
-                        .init(color: .black.opacity(0.35), location: 0.0),
-                        .init(color: .clear, location: 0.30),
-                        .init(color: .clear, location: 0.58),
-                        .init(color: .black.opacity(0.75), location: 0.82),
-                        .init(color: .black.opacity(0.95), location: 1.0),
-                    ], startPoint: .top, endPoint: .bottom),
-                )
+            ZStack {
+                // 1. Ambient blurred backdrop filling the entire widescreen edge-to-edge
+                RemoteImage(url: player.current?.artURL(size: 1280)) { Color.black }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .blur(radius: 48)
+                    .scaleEffect(1.15)
+                    .overlay(Color.black.opacity(0.32))
+
+                // 2. Crisp uncropped square album cover perfectly centered
+                let side = min(geo.size.width, geo.size.height)
+                RemoteImage(url: player.current?.artURL(size: 1280)) { Color.clear }
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: geo.size.width > geo.size.height ? 20 : 0, style: .continuous))
+                    .shadow(color: .black.opacity(0.55), radius: 28, y: 12)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .overlay(
+                LinearGradient(stops: [
+                    .init(color: .black.opacity(0.35), location: 0.0),
+                    .init(color: .clear, location: 0.25),
+                    .init(color: .clear, location: 0.65),
+                    .init(color: .black.opacity(0.75), location: 0.85),
+                    .init(color: .black.opacity(0.95), location: 1.0),
+                ], startPoint: .top, endPoint: .bottom)
+            )
         }
         .ignoresSafeArea()
     }
-
     // MARK: - iPad Landscape Minimal Single-Row Bottom Dock
 
     private var iPadBottomControlDock: some View {
