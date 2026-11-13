@@ -1787,22 +1787,26 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
             incoming.play()
             incoming.rate = transition.startRate
 
-            let steps = max(Int(seconds * 50), 1)
+            let steps = max(Int(seconds * 60), 1)
             var step = 0
             self.fadeTimer?.invalidate()
             self.fadeTimer = Timer.scheduledTimer(withTimeInterval: seconds / Double(steps),
                                                   repeats: true) { [weak self] timer in
                 guard let self else { timer.invalidate(); return }
                 step += 1
-                let progress = min(Double(step) / Double(steps), 1.0)
-                let angle = Float(progress * (.pi / 2.0))
+                let t = min(Double(step) / Double(steps), 1.0)
+                // Smooth S-curve (Hermite interpolation) for natural DJ energy handoff
+                let sCurve = t * t * (3.0 - 2.0 * t)
+                let angle = Float(sCurve * (.pi / 2.0))
 
+                // Equal-power S-curve volume blend
                 outgoing.volume = startVolume * cos(angle)
                 incoming.volume = targetVolume * sin(angle)
 
-                if transition.beatSynced && progress > 0.5 {
-                    let recovery = Float((progress - 0.5) * 2.0)
-                    incoming.rate = transition.startRate + (transition.targetRate - transition.startRate) * recovery
+                // Gradually glide incoming track tempo back to natural speed across the entire blend
+                if transition.beatSynced {
+                let glide = Float(sCurve)
+                incoming.rate = transition.startRate + (transition.targetRate - transition.startRate) * glide
                 }
 
                 guard step >= steps else { return }
@@ -1811,6 +1815,7 @@ private func startCrossfade(to url: URL, over seconds: Double, realDuration: Dou
                 self.beatSyncedMix = false
                 self.finishCrossfade(volume: targetVolume)
             }
+
         }
     }
     /// Hand over to the faded-in player. Deliberately does NOT call
