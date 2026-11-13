@@ -1,5 +1,9 @@
 import SwiftUI
 import UIKit
+import NaturalLanguage
+#if canImport(Translation)
+import Translation 
+#endif
 
 /// Inline lyrics.
 ///
@@ -63,6 +67,14 @@ struct LyricsPane: View {
     /// exactly what "it won't scroll, it just repositions" looks like.
     @State private var frozenIndex = 0
     @State private var ready = false
+    @AppStorage("showOfflineTranslateBtn") private var showOfflineTranslateBtn = true
+    @State private var offlineTranslationOn = false
+    @State private var offlineTranslatedLines: [Int: String] = [:]
+    @State private var offlineTranslatedPlain: String?
+    #if canImport(Translation)
+    @State private var translationConfig: TranslationSession.Configuration?
+    #endif
+
 
     private let anchorRatio: CGFloat = 0.35
     private let fallbackHeight: CGFloat = 68
@@ -76,7 +88,27 @@ struct LyricsPane: View {
             content
         }
         .task(id: player.current?.videoId) { await load() }
-        .onChange(of: clock.currentTime) {
+        .onChange(of: player.current?.videoId) { _ in
+         offlineTranslationOn = false
+         offlineTranslatedLines = [:]
+         offlineTranslatedPlain = nil
+         #if canImport(Translation)
+         translationConfig = nil
+         #endif
+     }
+     #if canImport(Translation)
+     .modifier(OfflineTranslationModifier(
+         configuration: translationConfig,
+         lines: result?.lines ?? [],
+         plain: result?.plain,
+         onTranslated: { lineMap, plainText in
+             self.offlineTranslatedLines = lineMap
+             self.offlineTranslatedPlain = plainText
+             self.offlineTranslationOn = true
+         }
+     ))
+     #endif
+     .onChange(of: clock.currentTime) {
             // Re-anchor whenever the player reports a new position.
             anchorPos = player.currentTime
             anchorWall = Date()
@@ -110,6 +142,27 @@ struct LyricsPane: View {
 
     private var headerRow: some View {
         HStack {
+        if showOfflineTranslateBtn {
+            Button {
+            Task { await handleOfflineTranslateTap() }
+             } label: {
+            HStack(spacing: 4) {
+            Image(systemName: "translate")
+            if offlineTranslationOn {
+            Text("ON")
+            .font(.system(size: 11, weight: .bold))
+                     }
+                 }
+                 .font(.system(size: 13, weight: .semibold))
+                 .foregroundStyle(offlineTranslationOn ? .black : .white)
+                 .padding(.horizontal, 11).padding(.vertical, 7)
+                 .background(offlineTranslationOn ? Color.white : Color.white.opacity(0.15))
+                 .clipShape(Capsule())
+             }
+             .disabled(pickerDisabled)
+             .opacity(pickerDisabled ? 0.4 : 1)
+         }
+
             Spacer()
             if !autoScroll {
                 Button { resync() } label: {
@@ -162,7 +215,7 @@ struct LyricsPane: View {
             syncedStage(r.lines)
         } else if let plain = result?.plain, !plain.isEmpty {
             ScrollView(showsIndicators: false) {
-                Text(plain)
+                Text((offlineTranslationOn ? offlineTranslatedPlain : nil) ?? plain)
                     .font(.system(size: 24, weight: .bold))
                     .tracking(-0.5)
                     .foregroundStyle(.white)
@@ -387,9 +440,14 @@ struct LyricsPane: View {
 
     /// The romanisation or translation for a line, if one has been prepared.
     private func secondaryText(_ lineIndex: Int?) -> String? {
-        guard let lineIndex, let id = player.current?.videoId else { return nil }
+    guard let lineIndex else { return nil }
+    if offlineTranslationOn, let translated = offlineTranslatedLines[lineIndex], !translated.isEmpty {
+    return translated
+        }
+        guard let id = player.current?.videoId else { return nil }
         return extraLines.text(for: id, line: lineIndex)
     }
+
 
     private func itemLineIndex(_ item: StageItem) -> Int? {
         if case .line(let i, _) = item { return i }
@@ -799,3 +857,89 @@ struct LyricsTimingSheet: View {
         .buttonStyle(.plain)
     }
 }
+extension LyricsPane {
+    @MainActor
+    private func handleOfflineTranslateTap() async {
+        if offlineTranslationOn {
+            offlineTranslationOn = false
+            return
+        }
+        if !offlineTranslatedLines.isEmpty || offlineTranslatedPlain != nil {
+            offlineTranslationOn = true
+            return
+        }
+
+        #if canImport(Translation)
+        if #available(iOS 18.0, *) {
+            let sampleText: String
+            if let r = result, r.synced, !r.lines.isEmpty {
+                sampleText = r.lines.prefix(8).map(\.text).joined(separator: "\n")
+            } else if let plain = result?.plain, !plain.isEmpty {
+                sampleText = String(plain.prefix(300))
+            } else {
+                return
+            }
+
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(sampleText)
+            guard let detectedLang = recognizer.dominantLanguage else { return }
+            let sourceLocale = Locale.Language(identifier: detectedLang.rawValue)
+
+            let targetIdentifier = Locale.preferredLanguages.first ?? Locale.current.identifier
+            let targetLocale = Locale.Language(identifier: targetIdentifier)
+
+            let availability = LanguageAvailability()
+            let status = await availability.status(from: sourceLocale, to: targetLocale)
+            guard status == .installed else {
+                return
+            }
+
+            if translationConfig == nil {
+                translationConfig = TranslationSession.Configuration(source: sourceLocale, target: targetLocale)
+            } else {
+                translationConfig?.invalidate()
+            }
+        }
+        #endif
+    }
+}
+
+#if canImport(Translation)
+private struct OfflineTranslationModifier: ViewModifier {
+    let configuration: TranslationSession.Configuration?
+    let lines: [LyricLine]
+    let plain: String?
+    let onTranslated: @MainActor ([Int: String], String?) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.translationTask(configuration) { session in
+                do {
+                    if !lines.isEmpty {
+                        let requests = lines.enumerated().compactMap { idx, line -> TranslationSession.Request? in
+                            let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty, trimmed != "♪" else { return nil }
+                            return TranslationSession.Request(sourceText: trimmed, clientIdentifier: "\(idx)")
+                        }
+                        guard !requests.isEmpty else { return }
+                        let responses = try await session.translations(from: requests)
+                        var map: [Int: String] = [:]
+                        for res in responses {
+                            if let idStr = res.clientIdentifier, let idx = Int(idStr) {
+                                map[idx] = res.targetText
+                            }
+                        }
+                        await onTranslated(map, nil)
+                    } else if let plain, !plain.isEmpty {
+                        let response = try await session.translate(plain)
+                        await onTranslated([:], response.targetText)
+                    }
+                } catch {
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+#endif
