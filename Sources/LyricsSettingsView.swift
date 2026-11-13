@@ -17,6 +17,7 @@ struct LyricsSettingsView: View {
     @State private var showLineSpacing = false
     @State private var showPosition = false
     @State private var showBetaConfirm = false
+    @AppStorage("showOfflineTranslateBtn") private var showOfflineTranslateBtn = true
 
     var body: some View {
         ScrollView {
@@ -140,7 +141,10 @@ struct LyricsSettingsView: View {
                     toggle("rectangle.topthird.inset.filled", "Hide the status bar",
                            "While lyrics are full screen",
                            isOn: $prefs.hideStatusBarFullscreen)
-                }
+                divider
+                 toggle("translate", "Show offline translate button",
+                "Shows a translate button at the top-left of lyrics (requires downloaded Apple offline language pack)",
+                isOn: $showOfflineTranslateBtn)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
